@@ -13,7 +13,7 @@ You need a Linux system with:
 - **Kernel headers** for your running kernel
 - **GCC** (or compatible C compiler)
 - **Make**
-- **Python 3.8+** (for the mixer daemon)
+- **Python 3.10+** (for the mixer daemon)
 - A **Thunderbolt 3/4** port (USB-C Thunderbolt)
 
 ### Fedora / RHEL

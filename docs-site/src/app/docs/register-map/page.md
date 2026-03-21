@@ -16,7 +16,7 @@ The BAR0 address space is divided into several functional regions:
 | DSP ring banks | `0x2000`–`0x23FF` | Per-DSP command and response ring buffers (DSP 0–3) |
 | Interrupt / DMA | `0x2200`–`0x22FF` | Interrupt controller, DMA control, transport |
 | Audio extension | `0x2240`–`0x2284` | Audio transport, channel counts, clock |
-| Mixer settings | `0x3800`–`0x3A5C` | DSP mixer parameter registers (52 settings) |
+| Mixer settings | `0x3800`–`0x3A5C` | DSP mixer parameter registers (52 setting slots; first 38 used) |
 | Mixer readback | `0x3810`–`0x3914` | Hardware readback status and data |
 | DSP ring banks (high) | `0x5E00`–`0x61FF` | Per-DSP ring buffers (DSP 4–7) |
 | DMA scatter-gather | `0x8000`–`0xBFFF` | Playback and capture DMA descriptor tables |
@@ -120,7 +120,7 @@ The DSP mixer engine uses a shared memory window at BAR0 + `0x3800` for paramete
 |---|---|---|---|
 | `0x3808` | `MIXER_SEQ_WR` | R/W | Sequence counter, host to DSP |
 | `0x380C` | `MIXER_SEQ_RD` | R | Sequence counter, DSP readback |
-| `0x38B4`–`0x3A5C` | `MIXER_SETTING[0..51]` | R/W | 52 settings, 8 bytes each (2 x u32) |
+| `0x38B4`–`0x3A5C` | `MIXER_SETTING[0..51]` | R/W | 52 setting slots, 8 bytes each (2 x u32). Only the first 38 (settings 0–37) are written during the batch update protocol. Settings 38–51 are reserved. |
 
 Each setting occupies two 32-bit words with paired value/mask encoding:
 

@@ -81,7 +81,7 @@ The script will:
 4. Run DTrace probes for approximately 10 seconds to capture routing data
 5. Save everything to a JSON file
 
-The output file is saved in the current directory with a timestamp, for example: `apollo-macos-capture-20260321-143022.json`
+The output file is saved in the current directory with a timestamp, for example: `apollo-macos-capture-YYYYMMDD-HHMMSS.json`
 
 ---
 

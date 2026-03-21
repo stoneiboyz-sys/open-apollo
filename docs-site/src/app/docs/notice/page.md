@@ -14,7 +14,7 @@ All code in this repository is original work based on clean-room reverse enginee
 
 We respect Universal Audio's intellectual property. If any content in this repository is believed to infringe on UA's rights, we welcome direct communication and will promptly make adjustments.
 
-**Contact:** [maintainer contact — to be filled before publishing]
+**Contact:** dev@rolo.work
 
 ## Trademarks
 

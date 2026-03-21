@@ -65,7 +65,7 @@ With `default.clock.allowed-rates` set, PipeWire can automatically switch the ha
 
 ### Via the Mixer Daemon
 
-The mixer daemon accepts sample rate changes through the TCP:4710 and WS:4720 control protocols, which are used by the console UI.
+The mixer daemon accepts sample rate changes through the TCP:4710 and WS:4721 control protocols, which are used by the console UI.
 
 ---
 
@@ -119,7 +119,9 @@ The driver writes a combined clock configuration value to the hardware:
 clock_config = clock_source | (rate_index << 8)
 ```
 
-For example, 48 kHz with internal clock: `0x0C | (2 << 8)` = `0x020C`.
+For example, 48 kHz with internal clock: `0x00 | (2 << 8)` = `0x0200`.
+
+> **Note:** The special value `0x0C` is used during initialization to activate DSP settings processing and is not the steady-state internal clock value.
 
 This value is written to the notification clock config register, followed by a clock doorbell write to signal the FPGA. The driver then waits up to 2 seconds for the DSP to acknowledge the rate change via the notification status register.
 

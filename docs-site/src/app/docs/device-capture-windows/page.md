@@ -110,10 +110,12 @@ The capture script reads the following BAR0 register offsets:
 | Register | Offset | Purpose |
 |---|---|---|
 | Firmware version | 0x0004 | Identifies firmware revision |
-| Device type | 0x0008 | Identifies Apollo model |
+| FPGA revision | 0x2218 | Device type (bits[31:28]) and FPGA version |
+| Extended caps | 0x2234 | Device type (bits[25:20]), DSP count (bits[15:8]) |
 | Serial number | 0x000C | For matching reports to devices |
 | DSP status | 0x0040 | Whether DSP is running |
-| Sequence counter | 0x0018 | DSP communication health |
+| Sequence counter (WR) | 0x3808 | DSP communication health (host → DSP) |
+| Sequence counter (RD) | 0x380C | DSP communication health (DSP → host) |
 | Sample rate | 0x0050 | Current audio sample rate |
 
 It also reads the first 64 bytes of PCI configuration space, which contains standard PCI fields: vendor ID, device ID, BAR addresses, and subsystem information.

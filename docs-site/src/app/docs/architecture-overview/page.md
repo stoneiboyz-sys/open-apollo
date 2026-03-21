@@ -10,10 +10,10 @@ Open Apollo consists of three main components that work together to provide full
 
 ```
 ┌─────────────────────┐     ┌─────────────────────┐
-│   Console UI        │     │   UA Connect         │
-│   (Electron/React)  │     │   (or other client)  │
+│   Console UI        │     │   ConsoleLink        │
+│   (Electron/React)  │     │   (iOS/iPad)         │
 └────────┬────────────┘     └────────┬─────────────┘
-         │ TCP:4710                  │ WS:4720
+         │ WS:4721                   │ TCP:4710
          │                          │
          └──────────┬───────────────┘
                     │
@@ -68,7 +68,7 @@ The driver communicates with hardware exclusively through memory-mapped I/O (MMI
 The userspace daemon is the control plane. It translates high-level mixer operations into low-level hardware commands:
 
 - **TCP server (port 4710)**: Speaks the same protocol as the original UA Console application
-- **WebSocket server (port 4720)**: Speaks the same protocol as UA Connect
+- **WebSocket server (port 4721)**: Speaks the same protocol as UA Connect
 - **State tree**: Maintains a hierarchical tree of all mixer controls (11,000+ nodes for Apollo x4), mirroring the structure expected by UA client software
 - **Hardware router**: Translates state tree changes into ioctl calls to the kernel driver
 - **Metering**: Computes audio level meters from PCM sample data
@@ -77,7 +77,7 @@ The daemon's protocol compatibility means existing UA client software can connec
 
 ### Console UI (`console/`)
 
-An Electron + React application that provides a graphical mixer control surface. It connects to the daemon via WebSocket on port 4720.
+An Electron + React application that provides a graphical mixer control surface. It connects to the daemon via WebSocket on port 4721.
 
 This component is a work in progress.
 
