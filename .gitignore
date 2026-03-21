@@ -30,3 +30,4 @@ Thumbs.db
 # Captures (never commit binary payloads)
 *.bin
 *.log
+.obsidian/
