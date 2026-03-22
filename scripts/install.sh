@@ -436,9 +436,22 @@ run_init() {
         return 0
     fi
 
-    # Driver may have auto-loaded via DKMS+udev when Apollo was detected
+    # Load the driver if not already loaded
+    if ! lsmod | grep -q ua_apollo; then
+        info "Loading driver..."
+        if run_sudo modprobe ua_apollo 2>/dev/null || run_sudo insmod "$PROJECT_DIR/driver/ua_apollo.ko" 2>/dev/null; then
+            ok "Driver loaded"
+        else
+            fail "Could not load driver — check dmesg for details"
+            STEP_STATUS[init]="fail"
+            STEP_DETAIL[init]="modprobe/insmod failed"
+            return 1
+        fi
+        sleep 2  # Give driver time to probe
+    fi
+
     if lsmod | grep -q ua_apollo; then
-        ok "Driver loaded (auto-detected Apollo hardware)"
+        ok "Driver loaded"
 
         # Wait briefly for device node
         local tries=0
@@ -509,11 +522,6 @@ run_init() {
         fi
 
         STEP_STATUS[init]="ok"
-    else
-        info "Driver not loaded yet — will auto-load on next boot (DKMS)"
-        info "Or load now: sudo modprobe ua_apollo"
-        STEP_STATUS[init]="ok"
-        STEP_DETAIL[init]="driver not loaded yet, will auto-load on boot"
     fi
 
     echo ""
