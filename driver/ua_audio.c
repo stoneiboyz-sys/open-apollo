@@ -2,7 +2,7 @@
 /*
  * Universal Audio Apollo — ALSA Audio Subsystem
  *
- * Copyright (c) 2026 open-apollo contributors
+ * Copyright (c) 2026 apollo-linux contributors
  *
  * Implements:
  *  - DMA buffer allocation and scatter-gather table programming
@@ -49,6 +49,9 @@ MODULE_PARM_DESC(skip_bus_coeff, "Skip BUS_COEFF (0x1D) in plugin chain (default
 static bool no_plugins;
 module_param(no_plugins, bool, 0444);
 MODULE_PARM_DESC(no_plugins, "Skip plugin chain entirely (keep ACEFACE)");
+
+/* Forward declarations */
+static void ua_pcie_setup(struct ua_device *ua);
 
 /* ----------------------------------------------------------------
  * Per-model channel counts
@@ -612,6 +615,7 @@ int ua_aceface_handshake(struct ua_device *ua)
 				ua_write(ua, UA_REG_NOTIF_STATUS, 0);
 
 				ua->aceface_done = true;
+				ua_pcie_setup(ua);
 				return 0;
 			}
 			msleep(UA_CONNECT_POLL_MS);
@@ -628,8 +632,8 @@ int ua_aceface_handshake(struct ua_device *ua)
  * Cold boot transport start/stop
  *
  * The FPGA ring buffer engine requires the FULL PrepareTransport
- * register sequence before it processes ring entries.  Discovered:
- * just writing AX_CONTROL=0x20F is insufficient.
+ * register sequence before it processes ring entries.  Discovered
+ * 2026-03-01: just writing AX_CONTROL=0x20F is insufficient.
  *
  * This encapsulates:
  *   1. Model channel count lookup
@@ -740,7 +744,7 @@ int ua_boot_transport_start(struct ua_device *ua)
 
 	/*
 	 * Give DMA engines time to stabilize after reset pulse.
-	 * Verified: without this delay, FPGA ignores
+	 * Verified 2026-03-01: without this delay, FPGA ignores
 	 * ring entries. 50ms is empirically sufficient.
 	 */
 	msleep(50);
@@ -771,7 +775,7 @@ void ua_boot_transport_stop(struct ua_device *ua)
 /* ----------------------------------------------------------------
  * DSP firmware connection handshake
  *
- * From kext CPcieAudioExtension::Connect() disassembly:
+ * From kext CPcieAudioExtension::Connect() disassembly (2026-02-28):
  *
  *   1. Write 0xACEFACE to BAR0 + bank*4 + 0xC004  (= 0xC02C for x4)
  *   2. Write 1 (doorbell) to BAR0 + 0x2260
@@ -854,7 +858,7 @@ static int ua_audio_connect(struct ua_device *ua)
 	 *
 	 * The kext uses up to 20 retries × 9 polls × 100ms = ~18 seconds.
 	 *
-	 * CRITICAL FIX: Use bank-shifted registers.
+	 * CRITICAL FIX (2026-02-28): Use bank-shifted registers.
 	 *   ACEFACE target: 0xC02C (was 0xC004)
 	 *   Status poll:    0xC030 (was 0x22C0)
 	 */
@@ -892,6 +896,7 @@ static int ua_audio_connect(struct ua_device *ua)
 				ua_audio_write_connect_config(ua);
 				ua_audio_read_connect_readback(ua);
 				ua->aceface_done = true;
+				ua_pcie_setup(ua);
 
 post_handshake:
 				/*
@@ -1373,15 +1378,16 @@ static int ua_audio_prepare_transport(struct ua_device *ua)
 	return 0;
 }
 
-static int ua_audio_start_transport(struct ua_device *ua)
+/*
+ * One-time PCIe setup: disable ASPM, increase completion timeouts.
+ * Called from probe/connect, NOT from pcm_prepare.
+ * Walking the Thunderbolt bridge chain takes milliseconds and must
+ * not run on PipeWire's real-time audio thread.
+ */
+static void ua_pcie_setup(struct ua_device *ua)
 {
-	struct ua_audio *audio = &ua->audio;
-	u32 ctrl, readback, sample_pos, frame_ctr, status;
-
-	if (audio->transport_running)
-		return 0;
-
-	/* Dump PCIe capabilities and disable ASPM on device + upstream bridge */
+	if (ua->pcie_setup_done)
+		return;
 	{
 		int pos;
 		u16 devctl, devsta, lnkctl, lnksta;
@@ -1485,6 +1491,17 @@ static int ua_audio_start_transport(struct ua_device *ua)
 			bridge = bridge->bus->self;
 		}
 	}
+	ua->pcie_setup_done = true;
+	dev_info(&ua->pdev->dev, "PCIe ASPM/timeout setup complete\n");
+}
+
+static int ua_audio_start_transport(struct ua_device *ua)
+{
+	struct ua_audio *audio = &ua->audio;
+	u32 ctrl, readback, sample_pos, frame_ctr, status;
+
+	if (audio->transport_running)
+		return 0;
 
 	/* Start: DMA + playback + record + interrupt */
 	ctrl = UA_AX_CTRL_START;
@@ -1682,7 +1699,7 @@ int ua_audio_dma_test(struct ua_device *ua, struct ua_dma_test *dt)
  *   Doorbell: write 4 to BAR0 + 0x2260
  *   Wait up to 2000ms for response
  *
- * CRITICAL FIX: Previous code wrote to 0xC04C (no bank
+ * CRITICAL FIX (2026-02-28): Previous code wrote to 0xC04C (no bank
  * shift) and polled 0x22C0 (transport status, NOT notification status).
  * ---------------------------------------------------------------- */
 
@@ -2009,7 +2026,7 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		/*
 		 * Rate change: disconnect/reconnect cycle.
 		 *
-		 * DTrace RE shows macOS does a full DSP
+		 * DTrace RE (2026-03-20) shows macOS does a full DSP
 		 * disconnect/reconnect with FW reload on every rate
 		 * change.  We implement the minimum: soft-disconnect
 		 * (preserves mixer DSP) then re-run connect setup to
@@ -2097,7 +2114,7 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 		 * silence.  After transport, playback passthrough
 		 * is already established and capture routing
 		 * activates correctly.
-		 * (Discovered: ordering is critical)
+		 * (Discovered 2026-03-18: ordering is critical)
 		 */
 		if (ua->aceface_done) {
 			/* Force source=0xC for internal clock — required for
@@ -2589,7 +2606,7 @@ static int ua_monitor_mono_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.mono)
 		return 0;
 
-	/* VERIFIED: mono uses param 0x03 value=1 (same param as mute) */
+	/* VERIFIED 2026-02-20: mono uses param 0x03 value=1 (same param as mute) */
 	ret = ua_monitor_set_param(ua, 0, UA_MON_PARAM_MUTE, newval ? 1 : 0);
 	if (ret)
 		return ret;
@@ -2633,7 +2650,7 @@ static int ua_monitor_source_put(struct snd_kcontrol *kctl,
 	if ((int)idx == ua->audio.monitor.source)
 		return 0;
 
-	/* DTrace-verified: Monitor Source uses ch_idx=1 */
+	/* DTrace-verified 2026-02-22: Monitor Source uses ch_idx=1 */
 	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_SOURCE, idx);
 	if (ret)
 		return ret;
@@ -2761,7 +2778,7 @@ static int ua_monitor_talkback_put(struct snd_kcontrol *kctl,
 	if (newval == ua->audio.monitor.talkback)
 		return 0;
 
-	/* DTrace-verified: ON uses ch_idx=1, OFF uses ch_idx=9 */
+	/* DTrace-verified 2026-02-22: ON uses ch_idx=1, OFF uses ch_idx=9 */
 	ret = ua_monitor_set_param(ua, newval ? 1 : 9,
 				   UA_MON_PARAM_TALKBACK,
 				   newval ? 1 : 0);
@@ -2850,7 +2867,7 @@ static int ua_output_ref_put(struct snd_kcontrol *kctl,
 	if ((int)idx == ua->audio.monitor.output_ref)
 		return 0;
 
-	/* VERIFIED: OutputRef uses ch_idx=1 (was 0) */
+	/* VERIFIED 2026-02-20: OutputRef uses ch_idx=1 (was 0) */
 	ret = ua_monitor_set_param(ua, 1, UA_MON_PARAM_OUTPUT_REF, idx);
 	if (ret)
 		return ret;

@@ -2,7 +2,7 @@
 /*
  * Universal Audio Apollo Thunderbolt - Linux PCIe Driver
  *
- * Copyright (c) 2026 open-apollo contributors
+ * Copyright (c) 2026 apollo-linux contributors
  *
  * Reverse engineered from UAD2System.kext v11.8.1
  */
@@ -354,7 +354,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
  * These go through DSP mixer settings, NOT through ARM CLI.
  * chan_type=1, chan_idx=preamp channel, param_id=one of these.
  *
- * Verified via DTrace + live hardware:
+ * Verified via DTrace + live hardware 2026-02-16:
  *   Mic/Line=0x00 (1=Line, 0=Mic)
  *   PAD=0x01 (on=1, off=0)
  *   48V=0x03 (on=1, off=0 — triggers ARM safety blink sequence)
@@ -493,7 +493,7 @@ static inline bool ua_uses_audio_extension(u32 device_type)
 #define UA_MON_MUTE_OFF         0
 
 /*
- * Complete Bus ID Map (verified via DTrace)
+ * Complete Bus ID Map (verified via DTrace Phase 3e, 2026-02-19)
  * Used in SEL130 (SetMixerBusParam) for fader/pan/send control.
  */
 #define UA_BUS_ANALOG_IN(n)     (n)           /* 0x0000-0x0003 */
@@ -735,6 +735,7 @@ struct ua_device {
 	bool fw_loaded;
 	bool dsps_connected;
 	bool aceface_done;          /* ACEFACE handshake completed */
+	bool pcie_setup_done;       /* PCIe ASPM/timeout configured */
 	bool plugins_activated;     /* Plugin chain sent to DSP */
 	bool skip_bus_coeff;        /* Skip BUS_COEFF in plugin chain */
 
