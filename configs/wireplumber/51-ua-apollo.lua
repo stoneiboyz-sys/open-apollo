@@ -1,9 +1,20 @@
 -- WirePlumber 0.4.x rules for Universal Audio Apollo interfaces
 -- Deploy to: /etc/wireplumber/main.lua.d/51-ua-apollo.lua
---
--- NOTE: The pro-audio profile must be set via wpctl after PipeWire starts,
--- because WirePlumber explicitly excludes pro-audio from auto-selection.
--- The apollo-init.sh script handles this.
+
+-- Force pro-audio profile on the Apollo ALSA device.
+-- Without this, WirePlumber picks the default profile which has no sinks.
+table.insert(alsa_monitor.rules, {
+  matches = {
+    {
+      { "device.name", "matches", "alsa_card.*" },
+      { "alsa.driver_name", "equals", "ua_apollo" },
+    },
+  },
+  apply_properties = {
+    -- Select the pro-audio profile automatically
+    ["device.profile"] = "pro-audio",
+  },
+})
 
 -- Node properties for Apollo output/input nodes
 table.insert(alsa_monitor.rules, {
