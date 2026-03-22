@@ -45,10 +45,19 @@ udevadm control --reload-rules 2>/dev/null || true
 echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
 echo "  -> /usr/local/bin/open-apollo-profile-setup"
 
-# Step 5: Deploy tray indicator (autostart + app launcher)
-echo "Installing tray indicator..."
+# Step 5: Deploy PipeWire I/O mapping (individual input/output devices)
+echo "Installing PipeWire I/O mapping..."
 DESKTOP_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -n "$DESKTOP_USER" ]; then
+    PW_CONF_DIR="$(eval echo ~"$DESKTOP_USER")/.config/pipewire/pipewire.conf.d"
+    mkdir -p "$PW_CONF_DIR"
+    cp "$SCRIPT_DIR/pipewire/filter-chain/apollo-io-map.conf" "$PW_CONF_DIR/"
+    echo "  -> $PW_CONF_DIR/apollo-io-map.conf"
+fi
+
+# Step 6: Deploy tray indicator (autostart + app launcher)
+echo "Installing tray indicator..."
 if [ -n "$DESKTOP_USER" ]; then
     # Autostart on login
     AUTOSTART_DIR="$(eval echo ~"$DESKTOP_USER")/.config/autostart"
