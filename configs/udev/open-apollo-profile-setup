@@ -28,8 +28,9 @@
     [ -z "$PW_USER" ] && exit 0
     [ -z "$PW_UID" ] && exit 0
 
-    # Helper: run command as the PipeWire user
-    pw_run() { sudo -u "$PW_USER" XDG_RUNTIME_DIR="/run/user/$PW_UID" "$@"; }
+    # Helper: run command as the PipeWire user (HOME must be set for config paths)
+    PW_HOME=$(eval echo "~$PW_USER")
+    pw_run() { sudo -u "$PW_USER" HOME="$PW_HOME" XDG_RUNTIME_DIR="/run/user/$PW_UID" "$@"; }
 
     # Run the full I/O setup (sets profile + creates virtual devices)
     if [ -x /usr/local/bin/apollo-setup-io ]; then
