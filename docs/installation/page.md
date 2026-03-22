@@ -100,11 +100,44 @@ Deploy the configurations:
 sudo bash configs/deploy.sh
 ```
 
-This copies the WirePlumber policy and UCM2 profiles to the correct system directories. Restart WirePlumber afterward:
+This copies the WirePlumber policy and UCM2 profiles to the correct system directories. Restart PipeWire and WirePlumber afterward:
 
 ```bash
-systemctl --user restart wireplumber
+systemctl --user restart pipewire wireplumber
 ```
+
+---
+
+## Initialize the Apollo
+
+After loading the driver and deploying configs, use the initialization script to bring the Apollo fully online:
+
+```bash
+sudo bash tools/apollo-init.sh
+```
+
+This script handles everything needed for a working Apollo:
+
+1. **Loads the driver** (if not already loaded)
+2. **Diagnoses DSP state** (cold boot, warm restart, or stalled)
+3. **Loads firmware** (on cold boot — replays 15 firmware blocks)
+4. **Triggers ACEFACE connect** (activates DSP routing tables)
+5. **Starts the mixer daemon** (TCP:4710 + TCP:4720 + WS:4721)
+6. **Sets the PipeWire pro-audio profile** (makes Apollo visible in desktop sound settings)
+
+After running, the Apollo should appear in your desktop sound settings and in `wpctl status`.
+
+### Options
+
+```bash
+sudo bash tools/apollo-init.sh --no-daemon  # Init only, don't start daemon
+sudo bash tools/apollo-init.sh --force       # Force firmware replay
+sudo bash tools/apollo-init.sh --status      # Print current Apollo state
+```
+
+### Troubleshooting init
+
+If the script reports **DSP STALLED** or **PCIe DEAD**, power cycle the Apollo (unplug power cable, wait 5 seconds, replug) and run the script again.
 
 ---
 
