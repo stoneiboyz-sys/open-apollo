@@ -208,16 +208,32 @@ check_install_deps() {
         fi
     fi
 
-    # Optional: pipewire / wireplumber
+    # Optional but recommended: pipewire, wireplumber, pavucontrol
     if ! command -v pw-cli &>/dev/null; then
-        warn "pipewire not found (optional)"
+        missing+=("pipewire")
+        case "$PKG_MGR" in
+            dnf)    missing_pkgs+=("pipewire") ;;
+            apt)    missing_pkgs+=("pipewire") ;;
+            pacman) missing_pkgs+=("pipewire") ;;
+        esac
     else
         ok "pipewire${PW_VER:+ ($PW_VER)}"
     fi
     if ! command -v wpctl &>/dev/null; then
-        warn "wireplumber not found (optional)"
+        missing+=("wireplumber")
+        case "$PKG_MGR" in
+            dnf)    missing_pkgs+=("wireplumber") ;;
+            apt)    missing_pkgs+=("wireplumber") ;;
+            pacman) missing_pkgs+=("wireplumber") ;;
+        esac
     else
         ok "wireplumber${WP_VER:+ ($WP_VER)}"
+    fi
+    if ! command -v pavucontrol &>/dev/null; then
+        missing+=("pavucontrol")
+        missing_pkgs+=("pavucontrol")
+    else
+        ok "pavucontrol"
     fi
 
     if [ ${#missing[@]} -eq 0 ]; then
@@ -445,18 +461,50 @@ run_init() {
         if [ -n "$pw_user" ] && command -v wpctl > /dev/null 2>&1; then
             info "Restarting PipeWire to apply configs..."
             sudo -u "$pw_user" systemctl --user restart pipewire wireplumber 2>/dev/null || true
-            sleep 2
+            sleep 3
 
-            # Set pro-audio profile
-            local dev_id
-            dev_id=$(sudo -u "$pw_user" wpctl status 2>/dev/null | \
-                grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+            # Find Apollo device in PipeWire and set pro-audio profile
+            local dev_id=""
+            local retries=0
+            while [ -z "$dev_id" ] && [ $retries -lt 5 ]; do
+                dev_id=$(sudo -u "$pw_user" wpctl status 2>/dev/null | \
+                    grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+                [ -z "$dev_id" ] && sleep 1
+                retries=$((retries + 1))
+            done
+
             if [ -n "$dev_id" ]; then
-                sudo -u "$pw_user" wpctl set-profile "$dev_id" 1 2>/dev/null || true
-                sleep 1
-                ok "PipeWire pro-audio profile set (device $dev_id)"
+                # Try profiles until we get a sink
+                local profile_set=0
+                for profile in 1 2 3; do
+                    sudo -u "$pw_user" wpctl set-profile "$dev_id" "$profile" 2>/dev/null || true
+                    sleep 1
+                    if sudo -u "$pw_user" wpctl status 2>/dev/null | grep -qi 'apollo.*sink\|apollo.*output'; then
+                        ok "PipeWire output sink active (device $dev_id, profile $profile)"
+                        profile_set=1
+                        break
+                    fi
+                done
+
+                if [ $profile_set -eq 0 ]; then
+                    # Still set profile 1 as default
+                    sudo -u "$pw_user" wpctl set-profile "$dev_id" 1 2>/dev/null || true
+                    ok "PipeWire profile set (device $dev_id)"
+                    info "If Apollo doesn't appear in Sound Settings, try: pavucontrol"
+                fi
+
+                # Set Apollo as default sink if possible
+                local sink_id
+                sink_id=$(sudo -u "$pw_user" wpctl status 2>/dev/null | \
+                    grep -i 'apollo.*sink\|apollo.*output' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+                if [ -n "$sink_id" ]; then
+                    sudo -u "$pw_user" wpctl set-default "$sink_id" 2>/dev/null || true
+                    ok "Apollo set as default audio output"
+                fi
             else
-                warn "Apollo not yet visible in PipeWire — will appear after reboot"
+                warn "Apollo not yet visible in PipeWire"
+                info "After reboot, it should appear automatically"
+                info "Or try: wpctl status && wpctl set-profile <ID> 1"
             fi
         fi
 
