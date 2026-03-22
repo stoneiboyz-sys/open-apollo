@@ -512,23 +512,36 @@ step "PipeWire"
 # WirePlumber explicitly excludes pro-audio from auto-selection,
 # so we must set it after PipeWire discovers the device.
 if command -v wpctl > /dev/null 2>&1; then
-    # Find the Apollo device ID in PipeWire (wpctl output has unicode box chars)
-    APOLLO_DEV_ID=$(sudo -u "$DAEMON_USER" wpctl status 2>/dev/null | \
-        grep 'Apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+    # wpctl needs XDG_RUNTIME_DIR to connect to PipeWire's user socket
+    DAEMON_UID=$(id -u "$DAEMON_USER" 2>/dev/null || echo "")
+    pw_run() { sudo -u "$DAEMON_USER" XDG_RUNTIME_DIR="/run/user/$DAEMON_UID" "$@"; }
+
+    # Restart WirePlumber to pick up device.profile rule
+    pw_run systemctl --user restart wireplumber 2>/dev/null || true
+    sleep 2
+
+    # Find the Apollo device ID in PipeWire
+    APOLLO_DEV_ID=$(pw_run wpctl status 2>/dev/null | \
+        grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
 
     if [ -n "$APOLLO_DEV_ID" ]; then
-        sudo -u "$DAEMON_USER" wpctl set-profile "$APOLLO_DEV_ID" 1 2>/dev/null
+        pw_run wpctl set-profile "$APOLLO_DEV_ID" 1 2>/dev/null
         sleep 1
         # Verify sink was created
-        if sudo -u "$DAEMON_USER" wpctl status 2>/dev/null | grep -q "Apollo.*Pro"; then
+        if pw_run wpctl status 2>/dev/null | grep -qi "Apollo.*Pro\|apollo.*sink"; then
             ok "PipeWire pro-audio profile active (24 out + 22 in channels)"
+            # Set as default
+            SINK_ID=$(pw_run wpctl status 2>/dev/null | \
+                grep -i 'apollo.*pro\|apollo.*sink' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+            [ -n "$SINK_ID" ] && pw_run wpctl set-default "$SINK_ID" 2>/dev/null && \
+                ok "Apollo set as default audio output"
         else
-            warn "PipeWire profile set but no nodes appeared"
+            warn "PipeWire profile set but no sink appeared"
             info "Try: wpctl set-profile $APOLLO_DEV_ID 1"
         fi
     else
         warn "Apollo not found in PipeWire (card may not be enumerated yet)"
-        info "Try: wpctl set-profile <DEVICE_ID> 1"
+        info "Try: wpctl status && wpctl set-profile <ID> 1"
     fi
 else
     info "wpctl not found — skipping PipeWire setup"
