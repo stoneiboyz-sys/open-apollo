@@ -36,6 +36,15 @@ echo "  -> /usr/share/alsa/ucm2/ua_apollo/HiFi.conf"
 ln -sf ../../ua_apollo/ua_apollo.conf /usr/share/alsa/ucm2/conf.d/ua_apollo/ua_apollo.conf
 echo "  -> /usr/share/alsa/ucm2/conf.d/ua_apollo/ua_apollo.conf (symlink)"
 
+# Step 4: Deploy udev rule + profile setup script
+echo "Installing udev rule for auto profile setup..."
+cp "$SCRIPT_DIR/udev/91-ua-apollo.rules" /etc/udev/rules.d/
+cp "$SCRIPT_DIR/udev/open-apollo-profile-setup" /usr/local/bin/
+chmod +x /usr/local/bin/open-apollo-profile-setup
+udevadm control --reload-rules 2>/dev/null || true
+echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
+echo "  -> /usr/local/bin/open-apollo-profile-setup"
+
 echo ""
 echo "=== Deployment complete ==="
 echo ""
@@ -43,3 +52,5 @@ echo "Next steps:"
 echo "  1. Restart PipeWire:  systemctl --user restart pipewire wireplumber"
 echo "  2. Verify:            wpctl status"
 echo "  3. Test playback:     pw-play /usr/share/sounds/freedesktop/stereo/complete.oga"
+echo ""
+echo "The Apollo will auto-configure as the default audio device when powered on."

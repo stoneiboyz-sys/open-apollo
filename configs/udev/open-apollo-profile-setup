@@ -1,0 +1,28 @@
+#!/bin/bash
+# open-apollo-profile-setup — Auto-set PipeWire pro-audio profile for Apollo
+# Triggered by udev when Apollo PCI device appears.
+# Runs in background to avoid blocking udev.
+
+(
+    sleep 8  # Wait for driver probe + PipeWire enumeration
+
+    # Find the logged-in user running PipeWire
+    PW_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
+    [ -z "$PW_USER" ] && exit 0
+
+    export XDG_RUNTIME_DIR="/run/user/$(id -u "$PW_USER")"
+
+    # Find Apollo device ID in PipeWire
+    DEV_ID=$(sudo -u "$PW_USER" wpctl status 2>/dev/null | \
+        grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+    [ -z "$DEV_ID" ] && exit 0
+
+    # Set pro-audio profile
+    sudo -u "$PW_USER" wpctl set-profile "$DEV_ID" 1 2>/dev/null
+
+    # Set as default sink
+    sleep 1
+    SINK_ID=$(sudo -u "$PW_USER" wpctl status 2>/dev/null | \
+        grep -i 'apollo.*sink\|apollo.*output' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
+    [ -n "$SINK_ID" ] && sudo -u "$PW_USER" wpctl set-default "$SINK_ID" 2>/dev/null
+) &

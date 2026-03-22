@@ -1,0 +1,4 @@
+# Auto-configure PipeWire pro-audio profile when Apollo appears
+# Deploy to: /etc/udev/rules.d/91-ua-apollo.rules
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x1a00", ATTR{device}=="0x0002", \
+  RUN+="/usr/local/bin/open-apollo-profile-setup"
