@@ -241,11 +241,7 @@ class ApolloTray:
     def on_init(self, _):
         init_script = os.path.join(REPO_ROOT, 'tools', 'apollo-init.sh')
         if os.path.exists(init_script):
-            # Run in a terminal so user can see output
-            subprocess.Popen([
-                'x-terminal-emulator', '-e',
-                f'sudo bash {init_script}; echo "Press Enter to close"; read'
-            ])
+            self.run_sudo(['bash', init_script])
         else:
             self.show_error(f'Init script not found: {init_script}')
 
