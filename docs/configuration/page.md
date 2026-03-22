@@ -16,6 +16,8 @@ The `ua_apollo` module accepts the following parameters, which can be set when l
 | `rec_ch` | int | `-1` (auto) | Override record channel count |
 | `no_connect` | bool | `false` | Skip the ACEFACE DSP connect handshake at probe (for debugging) |
 | `warm_boot` | bool | `false` | Skip firmware load and DSP connect; assume device is already initialized from a previous boot |
+| `skip_bus_coeff` | bool | `true` | Skip BUS_COEFF (0x1D) in plugin chain during init |
+| `no_plugins` | bool | `false` | Skip plugin chain entirely (keep ACEFACE) |
 
 ### Channel Count Override
 

@@ -38,6 +38,8 @@ sudo pacman -S linux-headers gcc make python
 
 ## Build the driver
 
+> **Automated installer:** The repository includes `scripts/install.sh`, which checks dependencies, builds the kernel module, optionally loads it, and deploys PipeWire/WirePlumber configs interactively. Run `bash scripts/install.sh` from the repo root to use it instead of the manual steps below.
+
 Clone the repository and build the kernel module:
 
 ```bash

@@ -98,7 +98,7 @@ Sets mixer bus parameters (fader levels, pan coefficients, send gains):
 ```
 word0: 0x001D0004    (command type 0x1D, 4 dwords)
 word1: bus_id        (0x00–0x1F)
-word2: sub_param     (0=main, 1=CUE1, 2=CUE2, 3=gainL, 4=gainR, 5=muteL, 6=muteR)
+word2: sub_param     (0=main, 1=CUE1, 2=CUE2, 3=gainL, 4=gainR)
 word3: value         (IEEE 754 float as u32)
 ```
 

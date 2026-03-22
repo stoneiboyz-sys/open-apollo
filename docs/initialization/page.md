@@ -178,7 +178,7 @@ The monitor init sends ~50 unique parameters across three sub-phases. The ch_idx
 
 - **ch_idx=0**: Global monitor controls (mute, mono, talkback config)
 - **ch_idx=1**: Per-output controls (volume, source, HP routing, dim)
-- **ch_idx=10**: Mirror/alt-monitor configuration
+- **ch_idx=9**: Mirror/alt-monitor configuration
 
 Key monitor parameters:
 
@@ -198,8 +198,8 @@ Key monitor parameters:
 | 0x44 | 1 | Dim | 0 (off) |
 | 0x3f | 1 | HP1 source | 0 (CUE1) |
 | 0x40 | 1 | HP2 source | 1 (CUE2) |
-| 0x2e | 10 | Mirror A destination | `0xFFFFFFFF` (none) |
-| 0x2f | 10 | Mirror B destination | `0xFFFFFFFF` (none) |
+| 0x2e | 9 | Mirror A destination | `0xFFFFFFFF` (none) |
+| 0x2f | 9 | Mirror B destination | `0xFFFFFFFF` (none) |
 | 0x48 | 0 | Unknown (transitions 0 to 1) | 0 then 1 |
 
 Param 0x6a (value=5) acts as a bookend signal --- it is sent at the start and end of monitor init. It may trigger the DSP to configure channel group processing slots.
@@ -230,7 +230,7 @@ Bus coefficients control fader levels, pan, sends, and mute state. Each call is 
 {session_id: u32, 0: u32, bus_id: u32, 0x02: u32, sub_param: u32, 0: u32, value_f32: u32, ...}
 ```
 
-Seven sub-parameters per bus:
+Five sub-parameters per bus:
 
 | Sub | Name | Purpose |
 |---|---|---|
@@ -239,8 +239,6 @@ Seven sub-parameters per bus:
 | 2 | CUE2 | CUE 2 send level |
 | 3 | Gain L | Left gain / AUX1 send |
 | 4 | Gain R | Right gain / AUX2 send |
-| 5 | Mute L | Left channel mute coefficient |
-| 6 | Mute R | Right channel mute coefficient |
 
 Bus coefficients are sent to 21 buses:
 

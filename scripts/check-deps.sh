@@ -48,8 +48,8 @@ echo ""
 
 # Runtime
 echo "Runtime:"
-check "python3 (>= 3.8)" \
-    "python3 -c 'import sys; assert sys.version_info >= (3,8)'" \
+check "python3 (>= 3.10)" \
+    "python3 -c 'import sys; assert sys.version_info >= (3,10)'" \
     "python3" "python3" "python3"
 
 echo ""

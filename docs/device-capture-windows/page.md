@@ -42,6 +42,8 @@ The setup script downloads WinRing0, verifies the file hash, and installs the ke
 
 ## Step 2: Run the capture
 
+> **Note:** The Windows capture script is a work-in-progress placeholder and may not produce complete capture data yet. Partial captures are still useful — please submit what you get.
+
 Make sure your Apollo is connected via Thunderbolt and powered on. UAD software should be installed (the driver must be active).
 
 In the same Administrator PowerShell:
@@ -109,10 +111,10 @@ The capture script reads the following BAR0 register offsets:
 
 | Register | Offset | Purpose |
 |---|---|---|
-| Firmware version | 0x0004 | Identifies firmware revision |
+| Firmware version | 0x0000 | Identifies firmware revision |
 | FPGA revision | 0x2218 | Device type (bits[31:28]) and FPGA version |
 | Extended caps | 0x2234 | Device type (bits[25:20]), DSP count (bits[15:8]) |
-| Serial number | 0x000C | For matching reports to devices |
+| Serial number | 0x2238 | For matching reports to devices |
 | DSP status | 0x0040 | Whether DSP is running |
 | Sequence counter (WR) | 0x3808 | DSP communication health (host → DSP) |
 | Sequence counter (RD) | 0x380C | DSP communication health (DSP → host) |

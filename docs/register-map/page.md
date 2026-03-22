@@ -13,12 +13,12 @@ The BAR0 address space is divided into several functional regions:
 | Region | Offset range | Purpose |
 |---|---|---|
 | Global / ID | `0x0000`–`0x0034` | Firmware version, serial number, hardware UID |
-| DSP ring banks | `0x2000`–`0x23FF` | Per-DSP command and response ring buffers (DSP 0–3) |
+| DSP ring banks | `0x2000`–`0x21FF` | Per-DSP command and response ring buffers (DSP 0–3) |
 | Interrupt / DMA | `0x2200`–`0x22FF` | Interrupt controller, DMA control, transport |
 | Audio extension | `0x2240`–`0x2284` | Audio transport, channel counts, clock |
 | Mixer settings | `0x3800`–`0x3A5C` | DSP mixer parameter registers (52 setting slots; first 38 used) |
 | Mixer readback | `0x3810`–`0x3914` | Hardware readback status and data |
-| DSP ring banks (high) | `0x5E00`–`0x61FF` | Per-DSP ring buffers (DSP 4–7) |
+| DSP ring banks (high) | `0x5E00`–`0x5FFF` | Per-DSP ring buffers (DSP 4–7) |
 | DMA scatter-gather | `0x8000`–`0xBFFF` | Playback and capture DMA descriptor tables |
 | Notification / SRAM | `0xC000`–`0xC4FF` | Config, notification status, IO descriptors, CLI |
 
@@ -55,8 +55,8 @@ The serial prefix (first 4 ASCII digits) identifies the device model. For exampl
 
 ### DMA control bitmask (v2 firmware)
 
-- Bits [8:1] — DMA engine enables (16 engines total with v2 mask `0x1FFFE`)
-- Bits [16:9] — Reset strobes. Write 1 to reset, then clear
+- Bits [8:1] — DMA engine enables (8 engines with v2 mask `0x1FFFE`)
+- Bits [16:9] — DMA engine reset strobes (8 strobes). Write 1 to reset, then clear
 
 A DMA reset pulse (set strobes then clear) while engines are enabled kicks the ring buffer DMA engine into an active state. Without this pulse, the FPGA ignores ring buffer doorbells.
 

@@ -69,6 +69,8 @@ cd open-apollo
 
 ## Step 3: Run the capture
 
+> **Note:** The macOS capture script is a work-in-progress placeholder and may not produce complete capture data yet. We are actively improving it — partial captures are still useful, so please submit what you get.
+
 ```bash
 sudo ./tools/contribute/macos/capture.sh
 ```

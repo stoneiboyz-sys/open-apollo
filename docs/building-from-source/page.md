@@ -210,7 +210,7 @@ Create `/usr/src/ua_apollo-0.1.0/dkms.conf`:
 
 ```ini
 PACKAGE_NAME="ua_apollo"
-PACKAGE_VERSION="0.2.0"
+PACKAGE_VERSION="0.1.0"
 BUILT_MODULE_NAME[0]="ua_apollo"
 BUILT_MODULE_LOCATION[0]="driver/"
 DEST_MODULE_LOCATION[0]="/extra"
@@ -223,9 +223,9 @@ CLEAN="make -C ${kernel_source_dir} M=${dkms_tree}/${PACKAGE_NAME}/${PACKAGE_VER
 
 ```bash
 sudo cp -r . /usr/src/ua_apollo-0.1.0/
-sudo dkms add -m ua_apollo -v 0.2.0
-sudo dkms build -m ua_apollo -v 0.2.0
-sudo dkms install -m ua_apollo -v 0.2.0
+sudo dkms add -m ua_apollo -v 0.1.0
+sudo dkms build -m ua_apollo -v 0.1.0
+sudo dkms install -m ua_apollo -v 0.1.0
 ```
 
 ### Step 4: Verify
@@ -234,7 +234,7 @@ sudo dkms install -m ua_apollo -v 0.2.0
 dkms status
 ```
 
-You should see `ua_apollo/0.2.0` listed as installed. On your next kernel update, DKMS will automatically rebuild the module.
+You should see `ua_apollo/0.1.0` listed as installed. On your next kernel update, DKMS will automatically rebuild the module.
 
 ---
 

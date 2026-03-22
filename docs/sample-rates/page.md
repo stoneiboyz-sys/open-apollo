@@ -121,7 +121,7 @@ clock_config = clock_source | (rate_index << 8)
 
 For example, 48 kHz with internal clock: `0x00 | (2 << 8)` = `0x0200`.
 
-> **Note:** The special value `0x0C` is used during initialization to activate DSP settings processing and is not the steady-state internal clock value.
+> **Note:** The value `0x0C` is the standard internal clock source value used by the macOS driver. Unlike `UA_CLOCK_INTERNAL` (0), source `0x0C` receives FPGA acknowledgment and enables DSP active processing after transport start.
 
 This value is written to the notification clock config register, followed by a clock doorbell write to signal the FPGA. The driver then waits up to 2 seconds for the DSP to acknowledge the rate change via the notification status register.
 

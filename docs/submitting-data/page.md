@@ -62,7 +62,7 @@ The capture tools do not collect:
 If you are comfortable with Git:
 
 1. Fork the repository
-2. Add your capture file to the `device_maps/` directory
+2. Add your capture file to the `mixer-engine/device_maps/` directory
 3. Name it descriptively: `device_map_apollo_<model>.json`
 4. Open a pull request with a description of your device
 

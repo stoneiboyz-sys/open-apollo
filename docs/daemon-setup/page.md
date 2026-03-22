@@ -134,13 +134,14 @@ ss -tlnp | grep -E '4710|4720|4721'
 The repository includes a ConsoleLink simulator:
 
 ```bash
+cd mixer-engine
 python3 test_client.py
 ```
 
 This replays the exact command sequence that ConsoleLink sends on connection. Use `--host` to test against a remote daemon:
 
 ```bash
-python3 test_client.py --host 192.168.1.100 -v
+python3 mixer-engine/test_client.py --host 192.168.1.100 -v
 ```
 
 ### Test with netcat

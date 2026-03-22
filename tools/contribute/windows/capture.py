@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 WINRING0_DLL = "WinRing0x64.dll" if platform.machine().endswith("64") else "WinRing0.dll"
 
 # Universal Audio PCI vendor/device IDs
-UA_VENDOR_ID = 0x1FC9  # NXP/UA
+UA_VENDOR_ID = 0x1A00  # Universal Audio
 UA_DEVICE_IDS = {
     0x0015: "Apollo Twin",
     0x0017: "Apollo x4",
@@ -216,7 +216,7 @@ def main():
     print()
     print("To submit to the Open Apollo project:")
     print("  1. Review the file -- it contains only hardware identifiers, no personal data")
-    print("  2. Go to: https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml")
+    print("  2. Go to: https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml")
     print("  3. Attach the JSON file or paste its contents")
     print("  4. Add notes about your Apollo model and what works/doesn't work")
     print()
