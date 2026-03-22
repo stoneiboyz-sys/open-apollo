@@ -51,7 +51,7 @@ We need community testers to verify each one.
 ### Build and Install
 
 ```bash
-git clone https://github.com/rolotrealanis98/open-apollo.git
+git clone https://github.com/open-apollo/open-apollo.git
 cd open-apollo
 
 # Check dependencies
@@ -82,18 +82,18 @@ cd mixer-engine
 python3 ua_mixer_daemon.py -v
 ```
 
-The daemon exposes TCP:4710 (ConsoleLink protocol) and WS:4721 (WebSocket)
-for mixer control from any client application.
+The daemon exposes TCP:4710 (ConsoleLink protocol), TCP:4720 (Mixer Helper /
+UBJSON), and WS:4721 (WebSocket) for mixer control from any client application.
 
 ## Architecture
 
 ```
-┌──────────────┐   ┌──────────────┐
-│ Console UI   │   │ ConsoleLink  │
-│ (WS:4721)    │   │ (TCP:4710)   │
-└──────┬───────┘   └──────┬───────┘
-       │                  │
-       └────────┬─────────┘
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│ ConsoleLink  │   │  UA Console  │   │  UA Connect  │
+│ (TCP:4710)   │   │  (TCP:4720)  │   │  (WS:4721)   │
+└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
+       │                  │                  │
+       └────────┬─────────┴──────────────────┘
                 │
        ┌────────▼────────┐
        │  Mixer Daemon   │
@@ -116,10 +116,9 @@ for mixer control from any client application.
 | Component | Path | Description |
 |-----------|------|-------------|
 | **Driver** | `driver/` | Linux PCIe kernel module — DMA, ALSA, DSP ring buffer, preamp control |
-| **Mixer Daemon** | `mixer-engine/` | TCP:4710 + WS:4721 daemon — state tree, hardware routing, metering |
+| **Mixer Daemon** | `mixer-engine/` | TCP:4710 + TCP:4720 + WS:4721 daemon — state tree, hardware routing, metering |
 | **Configs** | `configs/` | PipeWire, WirePlumber, and UCM2 configuration profiles |
 | **Tools** | `tools/contribute/` | Device probe and capture scripts for community contributions |
-| **Console UI** | *coming soon* | Mixer control surface (in development) |
 
 ## Documentation
 
@@ -131,6 +130,10 @@ Full documentation at **[open-apollo-docs.pages.dev](https://open-apollo-docs.pa
 - [Register map](https://open-apollo-docs.pages.dev/docs/register-map) — BAR0 hardware register documentation
 - [DSP protocol](https://open-apollo-docs.pages.dev/docs/dsp-protocol) — ring buffer commands and settings batch protocol
 - [How to contribute](https://open-apollo-docs.pages.dev/docs/how-to-contribute) — testing, device captures, code contributions
+
+Documentation content lives in the [`docs/`](docs/) directory of this repo. Edit the
+Markdown files there and submit a PR — changes are automatically deployed to the
+docs site.
 
 ## Contributing
 
@@ -145,7 +148,7 @@ for that device.
 
 1. Build and load the driver
 2. Run `./tools/contribute/device-probe.sh`
-3. [Submit a device report](https://github.com/rolotrealanis98/open-apollo/issues/new?template=device-report.yml)
+3. [Submit a device report](https://github.com/open-apollo/open-apollo/issues/new?template=device-report.yml)
 
 ## License
 
