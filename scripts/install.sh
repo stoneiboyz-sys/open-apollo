@@ -727,6 +727,21 @@ echo -e "${BOLD}Open Apollo — Installer${NC}"
 echo "======================="
 echo ""
 
+# Check if Apollo is connected — warn user to turn it off during install
+if lspci -d 1a00: 2>/dev/null | grep -q .; then
+    echo -e "${YELLOW}${BOLD}NOTE: Your Apollo is currently powered on.${NC}"
+    echo -e "${YELLOW}It is recommended to turn OFF the Apollo during installation${NC}"
+    echo -e "${YELLOW}to avoid system hangs. Power it on after the install completes.${NC}"
+    echo ""
+    read -rp "Continue with Apollo on? (not recommended) [y/N] " apollo_answer
+    if [[ ! "$apollo_answer" =~ ^[Yy] ]]; then
+        echo ""
+        info "Turn off the Apollo, then re-run this script."
+        exit 0
+    fi
+    echo ""
+fi
+
 detect_distro
 check_install_deps || true
 build_driver       || true
