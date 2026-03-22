@@ -792,4 +792,16 @@ info "Report: $REPORT_FILE"
 if [ -n "$APOLLO_PCIE" ] && [ "$SKIP_INIT" = "0" ]; then
     info "Init:   sudo bash $PROJECT_DIR/tools/apollo-init.sh --status"
 fi
+
+# Launch tray indicator if available
+pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+tray_script="$PROJECT_DIR/tools/open-apollo-tray.py"
+if [ -n "$pw_user" ] && [ -f "$tray_script" ] && python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
+    if ! pgrep -f "open-apollo-tray" > /dev/null 2>&1; then
+        info "Starting Open Apollo tray indicator..."
+        sudo -u "$pw_user" python3 "$tray_script" &>/dev/null &
+        disown
+        ok "Tray indicator running (look for the Apollo icon in your system tray)"
+    fi
+fi
 echo ""
