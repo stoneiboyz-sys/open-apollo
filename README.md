@@ -2,12 +2,11 @@
 
 **Open-source Linux driver for Universal Audio Apollo Thunderbolt interfaces**
 
-Open Apollo is working toward Linux support for Universal Audio's Apollo
+Open Apollo brings full Linux support to Universal Audio's Apollo
 Thunderbolt audio interfaces. Built through clean-room reverse engineering,
-this community-driven project is developing a native kernel driver and
-userspace mixer daemon. Currently verified on the Apollo x4 with playback,
-recording, preamp control, and DSP settings — additional devices and
-features are in active development.
+this community-driven project provides a native kernel driver, userspace
+mixer daemon, and system tray indicator. Verified on the Apollo x4 with
+clean playback and recording on Ubuntu 24.04 and Fedora 43.
 
 ## Current Status (Apollo x4)
 
@@ -17,6 +16,8 @@ features are in active development.
 - **Monitor control** — volume, mute, dim, mono, headphone routing
 - **DSP mixer** — input faders, pan, sends (AUX1/AUX2, CUE1/CUE2), solo, mute
 - **PipeWire/ALSA** — 50 ALSA mixer controls, WirePlumber and UCM2 configs included
+- **System tray indicator** — real-time status, one-click init, daemon control
+- **One-command install** — `sudo bash scripts/install.sh` handles everything
 
 **Not yet implemented:** talkback, virtual/monitor loopback, console UI, multi-device support
 
