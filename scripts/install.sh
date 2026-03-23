@@ -83,6 +83,7 @@ NEEDS_REBOOT=0
 DMESG_APOLLO="" DMESG_TB="" DMESG_IOMMU=""
 DEPS_INSTALLED=""
 BUILD_WARNINGS=0
+DMESG_FULL="" IOMMU_GROUPS="" AUDIO_APLAY="" AUDIO_ARECORD="" AUDIO_PWDUMP=""
 
 # ================================================================
 # Step 1: Detect distro
@@ -476,25 +477,6 @@ deploy_configs() {
         STEP_STATUS[configs]="fail"
         return 1
     fi
-
-    # Restart PipeWire/WirePlumber so new configs (especially device.profile) take effect
-    local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-    local pw_uid
-    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
-    if [ -n "$pw_user" ] && [ -n "$pw_uid" ] && command -v wpctl > /dev/null 2>&1; then
-        info "Restarting PipeWire/WirePlumber to apply configs..."
-        sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
-            systemctl --user restart pipewire wireplumber 2>/dev/null || true
-        sleep 3
-        ok "PipeWire restarted"
-
-        # Set up virtual I/O devices (discovers Apollo node names dynamically)
-        if [ -x /usr/local/bin/apollo-setup-io ]; then
-            info "Setting up Apollo virtual I/O devices..."
-            sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
-                /usr/local/bin/apollo-setup-io 2>&1 || true
-        fi
-    fi
 }
 
 # ================================================================
@@ -511,7 +493,7 @@ run_init() {
 
     if [ -z "$APOLLO_PCIE" ]; then
         info "No Apollo hardware detected on Thunderbolt bus"
-        info "After connecting Apollo, run: sudo bash tools/apollo-init.sh"
+        info "Connect Apollo and it will auto-configure via udev"
         STEP_STATUS[init]="skipped"
         STEP_DETAIL[init]="no hardware detected"
         return 0
@@ -529,89 +511,60 @@ run_init() {
             return 1
         fi
         sleep 2  # Give driver time to probe
+    else
+        ok "Driver already loaded"
     fi
 
-    if lsmod | grep -q ua_apollo; then
-        ok "Driver loaded"
+    # Wait briefly for device node
+    local tries=0
+    while [ ! -e /dev/ua_apollo0 ] && [ $tries -lt 30 ]; do
+        sleep 0.2
+        tries=$((tries + 1))
+    done
 
-        # Wait briefly for device node
-        local tries=0
-        while [ ! -e /dev/ua_apollo0 ] && [ $tries -lt 30 ]; do
-            sleep 0.2
-            tries=$((tries + 1))
-        done
-
-        if [ -e /dev/ua_apollo0 ]; then
-            ok "Device node: /dev/ua_apollo0"
-        fi
-
-        # Check ALSA
-        if aplay -l 2>/dev/null | grep -q ua_apollo; then
-            ok "ALSA card registered"
-        fi
-
-        # Restart PipeWire to pick up new configs
-        local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-        local pw_uid
-        pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
-
-        if [ -n "$pw_user" ] && [ -n "$pw_uid" ] && command -v wpctl > /dev/null 2>&1; then
-            # Helper: run command as the PipeWire user with correct env
-            pw_run() { sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" "$@"; }
-
-            info "Restarting PipeWire to apply configs..."
-            pw_run systemctl --user restart pipewire wireplumber 2>/dev/null || true
-            sleep 3
-
-            # Find Apollo device in PipeWire and set pro-audio profile
-            local dev_id=""
-            local retries=0
-            while [ -z "$dev_id" ] && [ $retries -lt 5 ]; do
-                dev_id=$(pw_run wpctl status 2>/dev/null | \
-                    grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
-                [ -z "$dev_id" ] && sleep 1
-                retries=$((retries + 1))
-            done
-
-            if [ -n "$dev_id" ]; then
-                # Try profiles until we get a sink
-                local profile_set=0
-                for profile in 1 2 3; do
-                    pw_run wpctl set-profile "$dev_id" "$profile" 2>/dev/null || true
-                    sleep 1
-                    if pw_run wpctl status 2>/dev/null | grep -qi 'apollo.*sink\|apollo.*output'; then
-                        ok "PipeWire output sink active (device $dev_id, profile $profile)"
-                        profile_set=1
-                        break
-                    fi
-                done
-
-                if [ $profile_set -eq 0 ]; then
-                    pw_run wpctl set-profile "$dev_id" 1 2>/dev/null || true
-                    ok "PipeWire profile set (device $dev_id)"
-                    info "If Apollo doesn't appear in Sound Settings, try: pavucontrol"
-                fi
-
-                # Set Apollo as default sink if possible
-                local sink_id
-                sink_id=$(pw_run wpctl status 2>/dev/null | \
-                    grep -i 'apollo.*sink\|apollo.*output' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
-                if [ -n "$sink_id" ]; then
-                    pw_run wpctl set-default "$sink_id" 2>/dev/null || true
-                    ok "Apollo set as default audio output"
-                fi
-            else
-                warn "Apollo not yet visible in PipeWire"
-                info "After reboot, it should appear automatically"
-                info "Or try: wpctl status && wpctl set-profile <ID> 1"
-            fi
-        fi
-
-        STEP_STATUS[init]="ok"
+    if [ -e /dev/ua_apollo0 ]; then
+        ok "Device node: /dev/ua_apollo0"
     fi
 
+    # Check ALSA
+    if aplay -l 2>/dev/null | grep -q ua_apollo; then
+        ok "ALSA card registered"
+    fi
+
+    # Run apollo-setup-io to configure PipeWire virtual devices
+    local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+    local pw_uid
+    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
+
+    if [ -n "$pw_user" ] && [ -n "$pw_uid" ] && command -v wpctl > /dev/null 2>&1; then
+        local pw_home
+        pw_home=$(eval echo "~$pw_user")
+
+        # Restart PipeWire so newly-deployed WirePlumber rules take effect
+        info "Restarting PipeWire to load new configs..."
+        sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+            systemctl --user restart pipewire wireplumber 2>/dev/null || true
+        sleep 3
+
+        info "Setting up PipeWire audio devices..."
+        sudo -u "$pw_user" HOME="$pw_home" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+            /usr/local/bin/apollo-setup-io 2>&1 || true
+
+        # Set Apollo Monitor as default sink
+        sleep 1
+        local sink_id
+        sink_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+            wpctl status 2>/dev/null | grep 'Apollo Monitor' | grep -oP '[0-9]+' | head -1 || true)
+        if [ -n "$sink_id" ]; then
+            sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+                wpctl set-default "$sink_id" 2>/dev/null || true
+            ok "Apollo Monitor L/R set as default audio output"
+        fi
+    fi
+
+    STEP_STATUS[init]="ok"
     echo ""
-    info "For cold boot init or troubleshooting: sudo bash tools/apollo-init.sh"
+    info "Apollo will auto-configure on future boots and reconnects"
 }
 
 # ================================================================
@@ -635,6 +588,24 @@ generate_report() {
         _steps_csv+="${key}:${STEP_STATUS[$key]:-skipped}:${STEP_DETAIL[$key]:-}|"
     done
 
+    # Collect extended diagnostics
+    DMESG_FULL=$(dmesg 2>/dev/null | grep -i ua_apollo || echo "")
+    IOMMU_GROUPS=""
+    if [ -d /sys/kernel/iommu_groups ]; then
+        IOMMU_GROUPS=$(for g in /sys/kernel/iommu_groups/*/devices/*; do
+            group=$(echo "$g" | grep -o 'iommu_groups/[0-9]*' | grep -o '[0-9]*')
+            dev=$(basename "$g")
+            desc=$(lspci -s "$dev" 2>/dev/null | cut -d' ' -f2- || echo "unknown")
+            echo "$group:$dev:$desc"
+        done 2>/dev/null | tr '\n' '|')
+    fi
+    AUDIO_APLAY=$(aplay -l 2>/dev/null || echo "not available")
+    AUDIO_ARECORD=$(arecord -l 2>/dev/null || echo "not available")
+    AUDIO_PWDUMP=""
+    if command -v pw-dump &>/dev/null; then
+        AUDIO_PWDUMP=$(pw-dump --no-colors 2>/dev/null | head -500 || echo "")
+    fi
+
     REPORT_DISTRO="$DISTRO" \
     REPORT_KERNEL="$KERNEL" \
     REPORT_ARCH="$ARCH" \
@@ -653,6 +624,12 @@ generate_report() {
     REPORT_STEPS="$_steps_csv" \
     REPORT_SUCCESS="$overall" \
     REPORT_FILE="$REPORT_FILE" \
+    REPORT_SCRIPT_VERSION="$VERSION" \
+    REPORT_DMESG_FULL="$DMESG_FULL" \
+    REPORT_IOMMU_GROUPS="$IOMMU_GROUPS" \
+    REPORT_AUDIO_APLAY="$AUDIO_APLAY" \
+    REPORT_AUDIO_ARECORD="$AUDIO_ARECORD" \
+    REPORT_AUDIO_PWDUMP="$AUDIO_PWDUMP" \
     python3 -c '
 import json, subprocess, os, datetime
 
@@ -676,9 +653,20 @@ def parse_steps(s):
         steps[key] = entry
     return steps
 
+def parse_iommu_groups(s):
+    groups = []
+    if not s: return groups
+    for entry in s.split("|"):
+        if not entry: continue
+        parts = entry.split(":", 2)
+        if len(parts) == 3:
+            groups.append({"group": parts[0], "device": parts[1], "description": parts[2]})
+    return groups
+
 e = os.environ
 report = {
-    "version": 1,
+    "version": 2,
+    "script_version": e["REPORT_SCRIPT_VERSION"],
     "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "success": e["REPORT_SUCCESS"] == "true",
     "system": {
@@ -697,14 +685,21 @@ report = {
         "existing_cards": split_list(e["REPORT_CARDS"]),
         "snd_modules": split_list(e["REPORT_MODS"]),
     },
+    "audio_state": {
+        "aplay": e.get("REPORT_AUDIO_APLAY", ""),
+        "arecord": e.get("REPORT_AUDIO_ARECORD", ""),
+        "pw_dump": e.get("REPORT_AUDIO_PWDUMP", ""),
+    },
     "apollo": {
         "detected": e["REPORT_APOLLO_DET"] == "true",
         "pcie_device": e["REPORT_APOLLO_PCI"],
         "thunderbolt_controller": e["REPORT_TB"],
     },
+    "iommu_groups": parse_iommu_groups(e.get("REPORT_IOMMU_GROUPS", "")),
     "steps": parse_steps(e["REPORT_STEPS"]),
     "logs": {
         "dmesg_apollo": dmesg_grep("ua_apollo"),
+        "dmesg_full": e.get("REPORT_DMESG_FULL", ""),
         "dmesg_thunderbolt": dmesg_grep("thunderbolt", 5),
         "dmesg_iommu": dmesg_grep("iommu", 5),
     },
@@ -732,6 +727,21 @@ telemetry_prompt() {
     fi
 
     if [[ "$answer" =~ ^[Yy] ]]; then
+        # Optional GitHub username for follow-up
+        local gh_user=""
+        if [ -t 0 ]; then
+            echo ""
+            read -rp "Optional: GitHub username for follow-up if we spot an issue (Enter to skip): " gh_user
+        fi
+        if [ -n "$gh_user" ]; then
+            python3 -c "
+import json, sys
+with open('$REPORT_FILE') as f: d = json.load(f)
+d['github_username'] = sys.argv[1]
+with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
+" "$gh_user"
+        fi
+
         info "Sending report to $TELEMETRY_URL..."
         local http_code
         http_code=$(curl -s -o /dev/null -w '%{http_code}' \
@@ -757,18 +767,10 @@ echo -e "${BOLD}Open Apollo — Installer${NC}"
 echo "======================="
 echo ""
 
-# Check if Apollo is connected — warn user to turn it off during install
+# Check if Apollo is connected
 if lspci -d 1a00: 2>/dev/null | grep -q .; then
-    echo -e "${YELLOW}${BOLD}NOTE: Your Apollo is currently powered on.${NC}"
-    echo -e "${YELLOW}It is recommended to turn OFF the Apollo during installation${NC}"
-    echo -e "${YELLOW}to avoid system hangs. Power it on after the install completes.${NC}"
-    echo ""
-    read -rp "Continue with Apollo on? (not recommended) [y/N] " apollo_answer
-    if [[ ! "$apollo_answer" =~ ^[Yy] ]]; then
-        echo ""
-        info "Turn off the Apollo, then re-run this script."
-        exit 0
-    fi
+    ok "Apollo detected on Thunderbolt bus"
+    info "Will configure audio automatically after install"
     echo ""
 fi
 
@@ -807,36 +809,7 @@ fi
 
 echo ""
 
-# --- Final PipeWire profile safety net ---
-# If Apollo is detected and we're running as sudo, make one last attempt
-# to set the profile in case the earlier step was skipped or failed.
-if [ -n "$APOLLO_PCIE" ] && [ "$SKIP_INIT" = "0" ] && command -v wpctl > /dev/null 2>&1; then
-    pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
-    if [ -n "$pw_user" ] && [ -n "$pw_uid" ]; then
-        # Check if Apollo has sinks yet
-        if ! sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl status 2>/dev/null | grep -qi 'apollo.*sink\|apollo.*pro'; then
-            dev_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl status 2>/dev/null | \
-                grep -i 'apollo\|ua_apollo' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
-            if [ -n "$dev_id" ]; then
-                info "Setting PipeWire pro-audio profile for Apollo (device $dev_id)..."
-                sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl set-profile "$dev_id" 1 2>/dev/null || true
-                sleep 2
-                sink_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl status 2>/dev/null | \
-                    grep -i 'apollo.*sink\|apollo.*pro' | head -1 | sed 's/[^0-9]*\([0-9]*\)\..*/\1/')
-                if [ -n "$sink_id" ]; then
-                    sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" wpctl set-default "$sink_id" 2>/dev/null || true
-                    ok "Apollo x4 Pro is now your default audio output"
-                fi
-            fi
-        fi
-    fi
-fi
-
 info "Report: $REPORT_FILE"
-if [ -n "$APOLLO_PCIE" ] && [ "$SKIP_INIT" = "0" ]; then
-    info "Init:   sudo bash $PROJECT_DIR/tools/apollo-init.sh --status"
-fi
 
 # Launch tray indicator if available
 pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
