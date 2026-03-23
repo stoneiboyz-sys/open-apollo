@@ -1,3 +1,9 @@
+[![Release](https://img.shields.io/github/v/release/rolotrealanis98/open-apollo?style=flat-square)](https://github.com/rolotrealanis98/open-apollo/releases)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg?style=flat-square)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
+[![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04-E95420?style=flat-square&logo=ubuntu&logoColor=white)](https://github.com/rolotrealanis98/open-apollo/wiki/Hardware-Compatibility)
+[![Docs](https://img.shields.io/badge/docs-open--apollo-blue?style=flat-square)](https://open-apollo-docs.pages.dev)
+[![Issues](https://img.shields.io/github/issues/rolotrealanis98/open-apollo?style=flat-square)](https://github.com/rolotrealanis98/open-apollo/issues)
+
 # Open Apollo
 
 **Open-source Linux driver for Universal Audio Apollo Thunderbolt interfaces**
