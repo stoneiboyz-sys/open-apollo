@@ -1,0 +1,56 @@
+name: Bug Report
+description: Report a bug or crash
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. Include what you expected vs what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can we trigger this bug?
+      placeholder: |
+        1. Run install script
+        2. Power on Apollo
+        3. Open Sound Settings
+        4. ...
+    validations:
+      required: true
+  - type: input
+    id: apollo-model
+    attributes:
+      label: Apollo model
+      placeholder: "e.g., Apollo x4, Twin X, x8p"
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distro and kernel
+      placeholder: "e.g., Ubuntu 24.04, kernel 6.17.0-19"
+    validations:
+      required: true
+  - type: input
+    id: connection
+    attributes:
+      label: Connection type
+      placeholder: "Thunderbolt 3, Thunderbolt 4, USB-C"
+    validations:
+      required: true
+  - type: textarea
+    id: dmesg
+    attributes:
+      label: dmesg output
+      description: "Run: `dmesg | grep ua_apollo | tail -20`"
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Additional logs
+      description: Any other relevant output (wpctl status, install script output, etc.)
+      render: shell

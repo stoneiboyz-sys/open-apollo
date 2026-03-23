@@ -1,0 +1,47 @@
+name: Hardware Test Report
+description: Report test results for an Apollo model
+labels: ["needs-testing"]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Apollo model
+      placeholder: "e.g., Apollo Twin X Thunderbolt"
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distro and kernel
+      placeholder: "e.g., Fedora 40, kernel 6.8.0"
+    validations:
+      required: true
+  - type: input
+    id: connection
+    attributes:
+      label: Connection and Thunderbolt controller
+      placeholder: "TB4 via Intel Maple Ridge"
+    validations:
+      required: true
+  - type: checkboxes
+    id: results
+    attributes:
+      label: Test results
+      options:
+        - label: "Driver loads (`lsmod | grep ua_apollo`)"
+        - label: "ALSA card appears (`aplay -l | grep Apollo`)"
+        - label: "Playback works (`pw-play` through Apollo)"
+        - label: "Capture works (`pw-record` from Apollo)"
+        - label: "Virtual I/O devices appear after `apollo-setup-io`"
+        - label: "Preamp controls work (`amixer -c x4 contents`)"
+  - type: textarea
+    id: dmesg
+    attributes:
+      label: dmesg output
+      description: "Run: `dmesg | grep ua_apollo`"
+      render: shell
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else worth mentioning (issues, workarounds, etc.)
