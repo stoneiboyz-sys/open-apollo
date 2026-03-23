@@ -63,6 +63,20 @@ warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()    { echo -e "${RED}[FAIL]${NC}  $*"; }
 header()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 
+# --- Prompt helper ---
+# Reads from /dev/tty so prompts work even when sudo password is piped via stdin
+prompt() {
+    local varname="$1"; shift
+    if [ -e /dev/tty ]; then
+        read -rp "$*" "$varname" < /dev/tty
+    else
+        eval "$varname=''"
+    fi
+}
+
+# Returns true if we can show interactive prompts
+can_prompt() { [ -e /dev/tty ]; }
+
 # --- Sudo helper ---
 run_sudo() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -499,7 +513,7 @@ run_init() {
         return 0
     fi
 
-    # Load the driver if not already loaded
+    # Gate 1: Load the driver
     if ! lsmod | grep -q ua_apollo; then
         info "Loading driver..."
         if run_sudo modprobe ua_apollo 2>/dev/null || run_sudo insmod "$PROJECT_DIR/driver/ua_apollo.ko" 2>/dev/null; then
@@ -510,28 +524,75 @@ run_init() {
             STEP_DETAIL[init]="modprobe/insmod failed"
             return 1
         fi
-        sleep 2  # Give driver time to probe
     else
         ok "Driver already loaded"
     fi
 
-    # Wait briefly for device node
+    # Gate 2: Wait for device node (driver probe complete)
+    info "Waiting for device node..."
     local tries=0
-    while [ ! -e /dev/ua_apollo0 ] && [ $tries -lt 30 ]; do
+    while [ ! -e /dev/ua_apollo0 ] && [ $tries -lt 50 ]; do
         sleep 0.2
         tries=$((tries + 1))
     done
-
     if [ -e /dev/ua_apollo0 ]; then
         ok "Device node: /dev/ua_apollo0"
+    else
+        fail "Device node /dev/ua_apollo0 did not appear after 10s"
+        STEP_STATUS[init]="fail"
+        STEP_DETAIL[init]="no device node"
+        return 1
     fi
 
-    # Check ALSA
-    if aplay -l 2>/dev/null | grep -q ua_apollo; then
+    # Gate 3: Wait for ACEFACE connect (DSP handshake)
+    # Check dmesg (needs sudo) or verify ALSA card appeared (indirect confirmation).
+    info "Waiting for DSP handshake..."
+    local aceface_ok=0
+    for i in $(seq 1 30); do
+        # Try dmesg with sudo first, fall back to checking ALSA card
+        if run_sudo dmesg 2>/dev/null | grep -q "audio extension connected\|ACEFACE already done"; then
+            aceface_ok=1
+            break
+        fi
+        # ALSA card appearing means driver probed + ACEFACE completed
+        if aplay -l 2>/dev/null | grep -qi apollo; then
+            aceface_ok=1
+            break
+        fi
+        sleep 1
+    done
+    if [ $aceface_ok -eq 1 ]; then
+        ok "DSP handshake complete"
+    else
+        warn "DSP handshake not confirmed after 30s — proceeding cautiously"
+    fi
+
+    # Gate 4: Verify ALSA card registered (retry up to 10s)
+    local alsa_ok=0
+    for i in $(seq 1 10); do
+        if aplay -l 2>/dev/null | grep -qi apollo; then
+            alsa_ok=1
+            break
+        fi
+        sleep 1
+    done
+    if [ $alsa_ok -eq 1 ]; then
         ok "ALSA card registered"
+    else
+        warn "ALSA card not found — audio may not work"
     fi
 
-    # Run apollo-setup-io to configure PipeWire virtual devices
+    # Gate 5: Verify hardware is responsive (read a register)
+    # Check that BAR0 reads don't return 0xFFFFFFFF
+    if dmesg 2>/dev/null | grep -q "device unreachable\|PCIe error detected"; then
+        fail "Apollo PCIe link is down — power cycle Apollo and try again"
+        STEP_STATUS[init]="fail"
+        STEP_DETAIL[init]="PCIe link dead"
+        return 1
+    fi
+    ok "Hardware responding"
+
+    # Gate 6: Set up PipeWire virtual I/O devices
     local pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
     local pw_uid
     pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
@@ -550,8 +611,18 @@ run_init() {
         sudo -u "$pw_user" HOME="$pw_home" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
             /usr/local/bin/apollo-setup-io 2>&1 || true
 
+        # Gate 7: Verify virtual devices appeared
+        sleep 2
+        local vdev_count
+        vdev_count=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+            wpctl status 2>/dev/null | grep -c 'Apollo' || echo 0)
+        if [ "$vdev_count" -ge 5 ]; then
+            ok "PipeWire virtual devices active ($vdev_count Apollo nodes)"
+        else
+            warn "Expected 5+ Apollo nodes, found $vdev_count — try: apollo-setup-io"
+        fi
+
         # Set Apollo Monitor as default sink
-        sleep 1
         local sink_id
         sink_id=$(sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
             wpctl status 2>/dev/null | grep 'Apollo Monitor' | grep -oP '[0-9]+' | head -1 || true)
@@ -767,12 +838,7 @@ echo -e "${BOLD}Open Apollo — Installer${NC}"
 echo "======================="
 echo ""
 
-# Check if Apollo is connected
-if lspci -d 1a00: 2>/dev/null | grep -q .; then
-    ok "Apollo detected on Thunderbolt bus"
-    info "Will configure audio automatically after install"
-    echo ""
-fi
+# ── Phase 1: Software install (no hardware needed) ──
 
 detect_distro
 check_install_deps || true
@@ -780,38 +846,151 @@ build_driver       || true
 setup_dkms         || true
 check_iommu        || true
 deploy_configs     || true
-run_init           || true
-generate_report
-telemetry_prompt
 
-# --- Summary ---
-header "Summary"
-
-ALL_OK=true
-for key in deps build dkms configs init; do
-    status="${STEP_STATUS[$key]:-skipped}"
-    case "$status" in
-        ok)      echo -e "  ${GREEN}[OK]${NC}    $key" ;;
-        fail)    echo -e "  ${RED}[FAIL]${NC}  $key${STEP_DETAIL[$key]:+ — ${STEP_DETAIL[$key]}}"; ALL_OK=false ;;
-        skipped) echo -e "  ${YELLOW}[SKIP]${NC}  $key" ;;
-    esac
-done
-
-echo ""
-if [ "$NEEDS_REBOOT" = "1" ]; then
-    echo -e "${YELLOW}${BOLD}Installation complete — REBOOT REQUIRED (iommu=pt added).${NC}"
-    info "After reboot: sudo bash tools/apollo-init.sh"
-elif [ "$ALL_OK" = true ]; then
-    echo -e "${GREEN}${BOLD}Installation complete.${NC}"
-else
-    echo -e "${YELLOW}${BOLD}Installation finished with issues — see above.${NC}"
+# Check if build succeeded before proceeding
+if [ "${STEP_STATUS[build]:-}" = "fail" ]; then
+    fail "Build failed — cannot continue"
+    generate_report
+    telemetry_prompt
+    echo ""
+    exit 1
 fi
 
+# ── Phase 2: Hardware verification ──
+# Always do a guided power cycle to ensure clean TB enumeration
+# after all configs and DKMS are in place.  This prevents race
+# conditions where PipeWire opens the device before ACEFACE completes.
+
+header "Hardware Setup"
 echo ""
 
-info "Report: $REPORT_FILE"
+if [ -t 0 ]; then
+    # Interactive mode — guide the user through power cycle
+    if lspci -d 1a00: 2>/dev/null | grep -q .; then
+        info "Apollo detected, but we need a clean start for reliable setup."
+        echo ""
+        echo -e "  ${BOLD}1.${NC} Power OFF your Apollo (unplug power or flip the switch)"
+        echo -e "  ${BOLD}2.${NC} Wait 5 seconds"
+        echo -e "  ${BOLD}3.${NC} Power it back ON and wait for the front panel to light up"
+        echo ""
+        read -rp "Press Enter once the Apollo is on and ready (~20s after power on)... "
+    else
+        info "Power on your Apollo and connect it via Thunderbolt."
+        info "Wait ~20 seconds after power on for Thunderbolt to initialize."
+        echo ""
+        read -rp "Press Enter once the Apollo front panel is lit up... "
+    fi
 
-# Launch tray indicator if available
+    # Poll for Apollo to appear on PCIe (TB enumeration takes 15-30s)
+    info "Waiting for Apollo on Thunderbolt bus..."
+    apollo_wait=0
+    while ! lspci -d 1a00: 2>/dev/null | grep -q . && [ $apollo_wait -lt 60 ]; do
+        sleep 2
+        apollo_wait=$((apollo_wait + 2))
+        [ $((apollo_wait % 10)) -eq 0 ] && info "  still waiting... (${apollo_wait}s)"
+    done
+
+    if lspci -d 1a00: 2>/dev/null | grep -q .; then
+        APOLLO_PCIE=$(lspci -d 1a00: 2>/dev/null | head -1 || echo "")
+        ok "Apollo detected: $APOLLO_PCIE"
+        # Give TB link a few extra seconds to stabilize
+        info "Waiting for Thunderbolt link to stabilize..."
+        sleep 5
+        ok "Ready"
+    else
+        warn "Apollo not detected after 60s"
+        info "You can run this later: apollo-setup-io"
+        STEP_STATUS[init]="skipped"
+        STEP_DETAIL[init]="Apollo not connected"
+    fi
+else
+    # Non-interactive — poll silently
+    info "Waiting up to 60s for Apollo on Thunderbolt bus..."
+    apollo_wait=0
+    while ! lspci -d 1a00: 2>/dev/null | grep -q . && [ $apollo_wait -lt 60 ]; do
+        sleep 2
+        apollo_wait=$((apollo_wait + 2))
+    done
+
+    if lspci -d 1a00: 2>/dev/null | grep -q .; then
+        APOLLO_PCIE=$(lspci -d 1a00: 2>/dev/null | head -1 || echo "")
+        ok "Apollo detected: $APOLLO_PCIE"
+        sleep 5  # TB stabilization
+    else
+        warn "Apollo not detected"
+        STEP_STATUS[init]="skipped"
+        STEP_DETAIL[init]="Apollo not connected"
+    fi
+fi
+
+run_init           || true
+
+# ── Start mixer daemon ──
+if [ "${STEP_STATUS[init]:-}" = "ok" ]; then
+    header "Mixer Daemon"
+
+    pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+    daemon_script="$PROJECT_DIR/mixer-engine/ua_mixer_daemon.py"
+    daemon_log="/tmp/ua-mixer-daemon.log"
+
+    if [ -n "$pw_user" ] && [ -f "$daemon_script" ]; then
+        # Kill any existing daemon
+        pkill -f "ua_mixer_daemon" 2>/dev/null || true
+        sleep 1
+
+        info "Starting mixer daemon..."
+        sudo -u "$pw_user" python3 "$daemon_script" --no-bonjour \
+            > "$daemon_log" 2>&1 &
+        disown
+
+        # Wait for daemon to start
+        sleep 3
+        if pgrep -f "ua_mixer_daemon" > /dev/null 2>&1; then
+            ok "Mixer daemon running (TCP:4710, WS:4720)"
+            STEP_STATUS[daemon]="ok"
+        else
+            warn "Mixer daemon failed to start — check $daemon_log"
+            STEP_STATUS[daemon]="fail"
+        fi
+    fi
+fi
+
+# ── Audio test ──
+AUDIO_VERIFIED=""
+if [ "${STEP_STATUS[init]:-}" = "ok" ] && [ -t 0 ]; then
+    header "Audio Test"
+
+    pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
+    pw_uid=$(id -u "$pw_user" 2>/dev/null || echo "")
+    if [ -n "$pw_user" ] && [ -n "$pw_uid" ]; then
+        echo ""
+        read -rp "Play a test tone through Apollo Monitor? [Y/n] " tone_answer
+        if [[ ! "$tone_answer" =~ ^[Nn] ]]; then
+            info "Playing test tone — you should hear it from your monitors..."
+            if sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
+                pw-play --target apollo_monitor /usr/share/sounds/freedesktop/stereo/complete.oga 2>/dev/null; then
+                sleep 1
+                read -rp "Did you hear audio? [Y/n] " heard_answer
+                if [[ "$heard_answer" =~ ^[Nn] ]]; then
+                    warn "No audio heard — check:"
+                    info "  1. Apollo Monitor knob is turned up"
+                    info "  2. Speakers/headphones connected to Monitor outputs"
+                    info "  3. Run: wpctl status (verify Apollo Monitor L/R is default)"
+                    AUDIO_VERIFIED="no"
+                else
+                    ok "Audio verified!"
+                    AUDIO_VERIFIED="yes"
+                fi
+            else
+                warn "Could not play test tone"
+                info "Try manually: pw-play /usr/share/sounds/freedesktop/stereo/complete.oga"
+                AUDIO_VERIFIED="fail"
+            fi
+        fi
+    fi
+fi
+
+# Launch tray indicator
 pw_user="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
 tray_script="$PROJECT_DIR/tools/open-apollo-tray.py"
 if [ -n "$pw_user" ] && [ -f "$tray_script" ] && python3 -c "import gi; gi.require_version('AppIndicator3','0.1')" 2>/dev/null; then
@@ -819,7 +998,34 @@ if [ -n "$pw_user" ] && [ -f "$tray_script" ] && python3 -c "import gi; gi.requi
         info "Starting Open Apollo tray indicator..."
         sudo -u "$pw_user" python3 "$tray_script" &>/dev/null &
         disown
-        ok "Tray indicator running (look for the Apollo icon in your system tray)"
+        ok "Tray indicator running"
     fi
 fi
+
+# --- Summary ---
+header "Summary"
+
+ALL_OK=true
+for key in deps build dkms configs init daemon; do
+    status="${STEP_STATUS[$key]:-skipped}"
+    case "$status" in
+        ok)      echo -e "  ${GREEN}[OK]${NC}    $key" ;;
+        fail)    echo -e "  ${RED}[FAIL]${NC}  $key${STEP_DETAIL[$key]:+ — ${STEP_DETAIL[$key]}}"; ALL_OK=false ;;
+        skipped) echo -e "  ${YELLOW}[SKIP]${NC}  $key" ;;
+    esac
+done
+[ -n "$AUDIO_VERIFIED" ] && echo -e "  ${GREEN}[OK]${NC}    audio test: $AUDIO_VERIFIED"
+
+echo ""
+if [ "$NEEDS_REBOOT" = "1" ]; then
+    echo -e "${YELLOW}${BOLD}Installation complete — REBOOT REQUIRED (iommu=pt added).${NC}"
+elif [ "$ALL_OK" = true ]; then
+    echo -e "${GREEN}${BOLD}Installation complete.${NC}"
+else
+    echo -e "${YELLOW}${BOLD}Installation finished with issues — see above.${NC}"
+fi
+
+# Report + telemetry at the very end (captures all results including audio test)
+generate_report
+telemetry_prompt
 echo ""
