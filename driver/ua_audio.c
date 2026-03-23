@@ -1137,17 +1137,15 @@ post_handshake:
 						 "plugin chain skipped (clobbers capture)\n");
 
 				/*
-				 * Do NOT start transport here during connect.
-				 * Starting transport on an unstable TB link
-				 * causes immediate PCIe AER errors and link
-				 * death.  Let pcm_prepare start transport
-				 * when audio actually needs to flow.
-				 *
-				 * The DSP service loop reads readback regs
-				 * which work without transport running.
+				 * Restart transport for DSP service.
 				 */
+				ua_write(ua, UA_REG_AX_CONTROL,
+					 UA_AX_CTRL_DMA_EN);
+				usleep_range(1000, 2000);
+				ua_write(ua, UA_REG_AX_CONTROL,
+					 UA_AX_CTRL_START_EXT);
 				dev_info(&ua->pdev->dev,
-					 "  connect complete (transport deferred to pcm_prepare)\n");
+					 "  transport restarted\n");
 
 				return 0;
 			}
@@ -1822,18 +1820,6 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
 		 audio->connected, audio->transport_running);
 
-	/*
-	 * Reject open if device is not connected (ACEFACE not done).
-	 * PipeWire/ALSA will retry later.  Without this gate, PipeWire
-	 * races to start transport before DSP is ready, causing
-	 * 0xFFFFFFFF reads and a dead PCIe link.
-	 */
-	if (!ua->aceface_done) {
-		dev_info(&ua->pdev->dev,
-			 "pcm_open: rejecting — ACEFACE not complete\n");
-		return -ENODEV;
-	}
-
 	runtime->hw = ua_pcm_hw;
 
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -1868,21 +1854,27 @@ static int ua_pcm_close(struct snd_pcm_substream *sub)
 	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	struct ua_audio *audio = &ua->audio;
 	unsigned long flags;
+	bool both_closed;
 
 	dev_info(&ua->pdev->dev,
 		 "pcm_close: stream=%s play_sub=%p rec_sub=%p transport=%d\n",
 		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
 		 audio->play_sub, audio->rec_sub, audio->transport_running);
 
+	/*
+	 * Clear substream pointer under lock — the hrtimer and audio
+	 * IRQ handler snapshot these under the same lock before use.
+	 */
 	spin_lock_irqsave(&audio->lock, flags);
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		audio->play_sub = NULL;
 	else
 		audio->rec_sub = NULL;
+	both_closed = !audio->play_sub && !audio->rec_sub;
 	spin_unlock_irqrestore(&audio->lock, flags);
 
 	/* Stop transport when both substreams are closed */
-	if (!audio->play_sub && !audio->rec_sub && audio->transport_running) {
+	if (both_closed && audio->transport_running) {
 		dev_info(&ua->pdev->dev,
 			 "pcm_close: both subs closed, stopping transport\n");
 		ua_audio_stop_transport(ua);
@@ -2188,6 +2180,8 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 	struct ua_audio *audio = container_of(timer, struct ua_audio,
 					      period_timer);
 	struct ua_device *ua = container_of(audio, struct ua_device, audio);
+	struct snd_pcm_substream *rec, *play;
+	unsigned long flags;
 	u32 sp;
 	snd_pcm_uframes_t pos, period_size;
 
@@ -2200,21 +2194,27 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 		return HRTIMER_NORESTART;
 	}
 
+	/*
+	 * Snapshot substream pointers under lock — pcm_close clears
+	 * these under the same lock, so without this we race and
+	 * deref a NULL pointer (crash on PipeWire restart).
+	 */
+	spin_lock_irqsave(&audio->lock, flags);
+	rec = audio->rec_sub;
+	play = audio->play_sub;
+	spin_unlock_irqrestore(&audio->lock, flags);
+
 	/* Check if a period boundary was crossed */
-	if (audio->rec_sub) {
-		period_size = audio->rec_sub->runtime->period_size;
-		pos = sp % audio->rec_sub->runtime->buffer_size;
-		if (pos / period_size != audio->last_period_pos / period_size) {
-			snd_pcm_period_elapsed(audio->rec_sub);
-		}
+	if (rec) {
+		period_size = rec->runtime->period_size;
+		pos = sp % rec->runtime->buffer_size;
+		if (pos / period_size != audio->last_period_pos / period_size)
+			snd_pcm_period_elapsed(rec);
 		audio->last_period_pos = pos;
 	}
 
-	if (audio->play_sub) {
-		period_size = audio->play_sub->runtime->period_size;
-		pos = sp % audio->play_sub->runtime->buffer_size;
-		snd_pcm_period_elapsed(audio->play_sub);
-	}
+	if (play)
+		snd_pcm_period_elapsed(play);
 
 	hrtimer_forward_now(timer, ms_to_ktime(1));
 	return HRTIMER_RESTART;
@@ -2236,8 +2236,15 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		/*
+		 * Use try_to_cancel — NOT hrtimer_cancel.
+		 * trigger(STOP) can be called from snd_pcm_period_elapsed()
+		 * inside the hrtimer callback itself (xrun path).
+		 * hrtimer_cancel() would deadlock waiting for the callback
+		 * that is calling us.
+		 */
 		audio->period_timer_running = false;
-		hrtimer_cancel(&audio->period_timer);
+		hrtimer_try_to_cancel(&audio->period_timer);
 		return 0;
 
 	default:
@@ -2329,15 +2336,24 @@ void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	/*
 	 * Notify ALSA of period elapsed.
 	 *
-	 * The hardware timer fires every buf_frame_size frames (~170ms
-	 * at 48kHz with 8192 frames).  We use this as the period elapsed
-	 * signal.  snd_pcm_period_elapsed() must be called outside the
-	 * audio spinlock since it may call back into our ops.
+	 * Snapshot substream pointers under lock — pcm_close clears
+	 * these under the same lock. Without this, we race and deref
+	 * a NULL pointer when PipeWire restarts.
 	 */
-	if (audio->play_sub)
-		snd_pcm_period_elapsed(audio->play_sub);
-	if (audio->rec_sub)
-		snd_pcm_period_elapsed(audio->rec_sub);
+	{
+		struct snd_pcm_substream *play, *rec;
+		unsigned long flags;
+
+		spin_lock_irqsave(&audio->lock, flags);
+		play = audio->play_sub;
+		rec = audio->rec_sub;
+		spin_unlock_irqrestore(&audio->lock, flags);
+
+		if (play)
+			snd_pcm_period_elapsed(play);
+		if (rec)
+			snd_pcm_period_elapsed(rec);
+	}
 }
 
 /* ----------------------------------------------------------------
