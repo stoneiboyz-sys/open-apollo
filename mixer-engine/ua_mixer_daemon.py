@@ -923,10 +923,10 @@ class MixerDaemon:
             mon(MON, 10, 0x3c, 0)      # MirrorEnableB = off
             mon(MON, 10, 0x39, 60)     # Clock/HP routing B = 60
             mon(MON, 1, 0x87, 0)       # Unknown
-            mon(MON, 1, 0x05, 2)       # CUE1 Mix = off
+            mon(MON, 1, 0x05, 0)       # CUE1 Mix = on (HP needs active CUE bus)
             mon(MON, 0, 0x06, 0)       # CUE1 Mono = off
             mon(MON, 10, 0x2e, 0xffffffff)  # MirrorA = disabled
-            mon(MON, 1, 0x07, 2)       # CUE2 Mix = off
+            mon(MON, 1, 0x07, 0)       # CUE2 Mix = on (HP needs active CUE bus)
             mon(MON, 0, 0x08, 0)       # CUE2 Mono = off
             mon(MON, 10, 0x2f, 0xffffffff)  # MirrorB = disabled
             mon(MON, 1, 0x22, 0)       # Unknown (setting[8])
