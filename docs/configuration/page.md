@@ -97,9 +97,39 @@ This configuration applies the following properties to all Apollo ALSA nodes:
 | `api.alsa.soft-mixer` | `true` | Use software volume; don't touch hardware monitor level |
 | `node.nick` | `Apollo` | Friendly name in desktop audio settings |
 
+### Virtual I/O Setup (apollo-setup-io)
+
+After the Apollo is powered on and the driver is loaded, run:
+
+```bash
+apollo-setup-io
+```
+
+This script discovers the Apollo's PCI address at runtime (Thunderbolt addresses vary between connections), sets the pro-audio PipeWire profile, and generates `~/.config/pipewire/pipewire.conf.d/apollo-io-map.conf` containing loopback modules that expose individual channel groups as named PipeWire devices.
+
+The loopback wiring follows the PipeWire docs convention:
+- **Capture sources** (Apollo → PipeWire): `capture.props` targets the ALSA input node as passive; `playback.props` declares `media.class = "Audio/Source"` for apps to read from.
+- **Playback sinks** (PipeWire → Apollo): `capture.props` declares `media.class = "Audio/Sink"` for apps to write to; `playback.props` targets the ALSA output node (not passive — must actively drive the output).
+
+After `apollo-setup-io` runs, the following devices are available:
+
+| Device | media.class | Channels | ALSA channels |
+|--------|-------------|----------|---------------|
+| Apollo Mic 1 | Audio/Source | Mono | capture AUX0 |
+| Apollo Mic 2 | Audio/Source | Mono | capture AUX1 |
+| Apollo Mic 1+2 | Audio/Source | Stereo | capture AUX0-1 |
+| Apollo Mic 3 | Audio/Source | Mono | capture AUX2 |
+| Apollo Mic 4 | Audio/Source | Mono | capture AUX3 |
+| Apollo Line In 3+4 | Audio/Source | Stereo | capture AUX2-3 |
+| Apollo Monitor L/R | Audio/Sink | Stereo | playback AUX0-1 |
+| Apollo Line Out 1+2 | Audio/Sink | Stereo | playback AUX2-3 |
+| Apollo Line Out 3+4 | Audio/Sink | Stereo | playback AUX4-5 |
+
+The config is regenerated on each run, so `apollo-setup-io` can be called after any Apollo power cycle to update the node names for the new PCI address.
+
 ### Pro-Audio Profile
 
-WirePlumber does not auto-select the pro-audio profile. After PipeWire starts, set it manually:
+WirePlumber does not auto-select the pro-audio profile. `apollo-setup-io` sets it automatically. To set it manually:
 
 ```bash
 # Find the Apollo device ID
@@ -108,8 +138,6 @@ wpctl status
 # Set pro-audio profile (replace <id> with the device ID)
 wpctl set-profile <id> pro-audio
 ```
-
-To make this automatic, you can create a WirePlumber script or a systemd user service that runs after `wireplumber.service`.
 
 ---
 

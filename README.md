@@ -15,9 +15,9 @@ clean playback and recording on Ubuntu 24.04 and Fedora 43.
 - **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching
 - **Monitor control** — volume, mute, dim, mono, headphone routing
 - **DSP mixer** — input faders, pan, sends (AUX1/AUX2, CUE1/CUE2), solo, mute
-- **PipeWire/ALSA** — 50 ALSA mixer controls, WirePlumber and UCM2 configs included
+- **PipeWire/ALSA** — 50 ALSA mixer controls, WirePlumber and UCM2 configs included; virtual I/O devices via `apollo-setup-io`
 - **System tray indicator** — real-time status, one-click init, daemon control
-- **One-command install** — `sudo bash scripts/install.sh` handles everything
+- **One-command install** — `sudo bash scripts/install.sh` handles everything; tested 8/8 cycles on Ubuntu 24.04
 
 **Not yet implemented:** talkback, virtual/monitor loopback, console UI, multi-device support
 
@@ -44,37 +44,56 @@ We need community testers to verify each one.
 
 ### Prerequisites
 
+- Ubuntu 24.04 LTS (primary tested platform) or Fedora 43 / Arch Linux
 - Linux kernel 6.1+ with headers installed
 - Thunderbolt 3 or 4 connection
 - GCC, Make
 - Python 3.10+ (for mixer daemon)
+- `iommu=pt` kernel parameter required on most systems (see below)
 
-### Build and Install
+### Install
+
+**Power off the Apollo before running the installer** — DKMS auto-loading while the device is connected can hang the system.
 
 ```bash
 git clone https://github.com/open-apollo/open-apollo.git
 cd open-apollo
-
-# Check dependencies
-./scripts/check-deps.sh
-
-# Build and install
-./scripts/install.sh
-
-# Or build manually
-cd driver && make
-sudo insmod ua_apollo.ko
+sudo bash scripts/install.sh
 ```
 
-### Verify
+The installer handles dependencies, kernel module build, DKMS registration, IOMMU detection, and PipeWire/WirePlumber config deployment.
 
-```bash
-# Check driver loaded
-dmesg | grep ua_apollo
+### Post-install: power on and configure I/O
 
-# Check ALSA card
-aplay -l
-```
+After install completes:
+
+1. Power on the Apollo and wait ~20 seconds for Thunderbolt enumeration
+2. Run the init script (loads firmware, activates DSP, starts the daemon):
+   ```bash
+   sudo bash tools/apollo-init.sh
+   ```
+3. Set up virtual I/O devices (run once per session, or automate via udev/systemd):
+   ```bash
+   apollo-setup-io
+   ```
+
+The `apollo-setup-io` command discovers the Apollo's PCI address at runtime, sets the pro-audio PipeWire profile, and creates named virtual devices for each input and output group.
+
+### Virtual I/O devices (Apollo x4)
+
+After running `apollo-setup-io`, these devices are available in PipeWire:
+
+| Device | Type | Channels |
+|--------|------|----------|
+| Apollo Mic 1 | Source (capture) | Mono |
+| Apollo Mic 2 | Source (capture) | Mono |
+| Apollo Mic 1+2 | Source (capture) | Stereo |
+| Apollo Mic 3 | Source (capture) | Mono |
+| Apollo Mic 4 | Source (capture) | Mono |
+| Apollo Line In 3+4 | Source (capture) | Stereo |
+| Apollo Monitor L/R | Sink (playback) | Stereo |
+| Apollo Line Out 1+2 | Sink (playback) | Stereo |
+| Apollo Line Out 3+4 | Sink (playback) | Stereo |
 
 ### Start the Mixer Daemon
 

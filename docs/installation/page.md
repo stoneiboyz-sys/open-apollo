@@ -139,7 +139,7 @@ Deploy the configurations:
 sudo bash configs/deploy.sh
 ```
 
-This copies the WirePlumber policy and UCM2 profiles to the correct system directories. Restart PipeWire and WirePlumber afterward:
+This copies the WirePlumber policy, UCM2 profiles, and the `apollo-setup-io` script to the correct system directories. Restart PipeWire and WirePlumber afterward:
 
 ```bash
 systemctl --user restart pipewire wireplumber
@@ -156,8 +156,14 @@ After the install completes:
 1. **Power on the Apollo** using its rear power switch
 2. **Wait approximately 20 seconds** for Thunderbolt enumeration to complete
 3. The driver auto-loads via DKMS — no manual `insmod` needed
-4. The WirePlumber rule automatically sets the pro-audio profile
-5. The Apollo should appear in your desktop Sound Settings as **"Apollo x4 Pro"** (or your model name)
+4. Run the init script to load firmware, activate the DSP, and start the daemon:
+   ```bash
+   sudo bash tools/apollo-init.sh
+   ```
+5. Set up PipeWire virtual I/O devices:
+   ```bash
+   apollo-setup-io
+   ```
 
 You can verify with:
 
@@ -206,6 +212,34 @@ sudo bash tools/apollo-init.sh --status      # Print current Apollo state
 ### Troubleshooting init
 
 If the script reports **DSP STALLED** or **PCIe DEAD**, power cycle the Apollo (unplug power cable, wait 5 seconds, replug) and run the script again.
+
+---
+
+## Set up virtual I/O devices
+
+After the Apollo is initialized, run:
+
+```bash
+apollo-setup-io
+```
+
+This script discovers the Apollo's PCI address at runtime (Thunderbolt addresses vary between connections), sets the pro-audio PipeWire profile, generates `~/.config/pipewire/pipewire.conf.d/apollo-io-map.conf`, and restarts PipeWire to load it.
+
+After running, the following virtual devices are available in PipeWire:
+
+| Device | Type | Channels |
+|--------|------|----------|
+| Apollo Mic 1 | Source | Mono (capture ch 0) |
+| Apollo Mic 2 | Source | Mono (capture ch 1) |
+| Apollo Mic 1+2 | Source | Stereo (capture ch 0-1) |
+| Apollo Mic 3 | Source | Mono (capture ch 2) |
+| Apollo Mic 4 | Source | Mono (capture ch 3) |
+| Apollo Line In 3+4 | Source | Stereo (capture ch 2-3) |
+| Apollo Monitor L/R | Sink | Stereo (playback ch 0-1) |
+| Apollo Line Out 1+2 | Sink | Stereo (playback ch 2-3) |
+| Apollo Line Out 3+4 | Sink | Stereo (playback ch 4-5) |
+
+`apollo-setup-io` must be run after each Apollo power-on. To run it automatically when the Apollo powers on, wire it to a udev rule or a systemd user service that triggers on Apollo device arrival.
 
 ---
 
@@ -278,9 +312,10 @@ echo "ua_apollo" | sudo tee /etc/modules-load.d/ua_apollo.conf
 
 - **Apollo must be powered off during installation** — DKMS auto-loading while the Apollo is connected can cause system hangs
 - **`apollo-init.sh` must be run after each cold boot** — a systemd service for automatic initialization is planned for a future release
-- **`iommu=pt` kernel parameter is required** on systems with Intel VT-d or AMD-Vi enabled (most modern systems, including Ubuntu defaults)
+- **`apollo-setup-io` must be run after each Apollo power-on** — it regenerates the PipeWire loopback config with the current (dynamic) PCIe address
+- **`iommu=pt` kernel parameter is required** on most modern systems — Ubuntu 24.04 enables IOMMU by default; without `iommu=pt`, BAR0 reads return `0xFFFFFFFF` and audio does not work
 - **Audacity and raw-ALSA apps may freeze the desktop** — these apps probe ALSA devices directly, bypassing PipeWire, which can lock up the audio subsystem. Use PipeWire-native applications instead: `pw-record`, `pw-play`, REAPER, Ardour, or any JACK-compatible DAW
-- **PCIe address varies** between Thunderbolt connections — the driver handles this automatically, but don't hardcode addresses in scripts
+- **PCIe address varies** between Thunderbolt connections — the driver and `apollo-setup-io` both handle this automatically; never hardcode PCIe addresses in scripts
 
 ---
 
@@ -288,8 +323,10 @@ echo "ua_apollo" | sudo tee /etc/modules-load.d/ua_apollo.conf
 
 | Distro | Kernel | CPU | Thunderbolt | Status |
 |--------|--------|-----|-------------|--------|
-| Ubuntu 24.04.4 LTS | 6.17.0-19-generic | Intel i9-14900K | Thunderbolt 4 (Maple Ridge) | Fully working |
+| Ubuntu 24.04.4 LTS | 6.17.0-19-generic | Intel i9-14900K | Thunderbolt 4 (Maple Ridge) | Fully working — 8/8 install cycles verified |
 | Fedora 43 | 6.18.16-200.fc43.x86_64 | — | Thunderbolt 3 | Fully working |
+
+Ubuntu 24.04 is the primary tested platform. Install testing was performed on overlayroot (ephemeral filesystem) to guarantee clean-state reproducibility across all 8 cycles.
 
 ---
 
