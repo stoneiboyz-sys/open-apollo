@@ -127,8 +127,9 @@ context.modules = [
 
     # ═══════════════════════════════════════════
     # CAPTURE SOURCES (Apollo → PipeWire)
-    # Pattern from PipeWire docs: capture side targets ALSA input (passive),
-    # playback side presents as Audio/Source for apps to read from.
+    # Based on PipeWire loopback docs (Scarlett Focusrite / Behringer examples):
+    #   capture side: target.object → ALSA input, node.passive, stream.dont-remix
+    #   playback side: media.class = Audio/Source, named node for app selection
     # ═══════════════════════════════════════════
 
     # Mic 1 (mono)
@@ -136,15 +137,15 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 1"
             capture.props = {
-                audio.position      = [ AUX0 ]
-                stream.dont-remix   = true
-                node.target         = "$INPUT_NODE"
-                node.passive        = true
+                audio.position        = [ AUX0 ]
+                stream.dont-remix     = true
+                node.target           = "$INPUT_NODE"
+                node.passive          = true
             }
             playback.props = {
-                node.name           = "apollo_mic_1"
-                media.class         = "Audio/Source"
-                audio.position      = [ MONO ]
+                node.name             = "apollo_mic_1"
+                media.class           = "Audio/Source"
+                audio.position        = [ MONO ]
             }
         }
     }
@@ -154,15 +155,15 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 2"
             capture.props = {
-                audio.position      = [ AUX1 ]
-                stream.dont-remix   = true
-                node.target         = "$INPUT_NODE"
-                node.passive        = true
+                audio.position        = [ AUX1 ]
+                stream.dont-remix     = true
+                node.target           = "$INPUT_NODE"
+                node.passive          = true
             }
             playback.props = {
-                node.name           = "apollo_mic_2"
-                media.class         = "Audio/Source"
-                audio.position      = [ MONO ]
+                node.name             = "apollo_mic_2"
+                media.class           = "Audio/Source"
+                audio.position        = [ MONO ]
             }
         }
     }
@@ -172,15 +173,15 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 1+2"
             capture.props = {
-                audio.position      = [ AUX0 AUX1 ]
-                stream.dont-remix   = true
-                node.target         = "$INPUT_NODE"
-                node.passive        = true
+                audio.position        = [ AUX0 AUX1 ]
+                stream.dont-remix     = true
+                node.target           = "$INPUT_NODE"
+                node.passive          = true
             }
             playback.props = {
-                node.name           = "apollo_mic_stereo"
-                media.class         = "Audio/Source"
-                audio.position      = [ FL FR ]
+                node.name             = "apollo_mic_stereo"
+                media.class           = "Audio/Source"
+                audio.position        = [ FL FR ]
             }
         }
     }
@@ -190,15 +191,15 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 3"
             capture.props = {
-                audio.position      = [ AUX2 ]
-                stream.dont-remix   = true
-                node.target         = "$INPUT_NODE"
-                node.passive        = true
+                audio.position        = [ AUX2 ]
+                stream.dont-remix     = true
+                node.target           = "$INPUT_NODE"
+                node.passive          = true
             }
             playback.props = {
-                node.name           = "apollo_mic_3"
-                media.class         = "Audio/Source"
-                audio.position      = [ MONO ]
+                node.name             = "apollo_mic_3"
+                media.class           = "Audio/Source"
+                audio.position        = [ MONO ]
             }
         }
     }
@@ -208,15 +209,15 @@ context.modules = [
         args = {
             node.description = "Apollo Mic 4"
             capture.props = {
-                audio.position      = [ AUX3 ]
-                stream.dont-remix   = true
-                node.target         = "$INPUT_NODE"
-                node.passive        = true
+                audio.position        = [ AUX3 ]
+                stream.dont-remix     = true
+                node.target           = "$INPUT_NODE"
+                node.passive          = true
             }
             playback.props = {
-                node.name           = "apollo_mic_4"
-                media.class         = "Audio/Source"
-                audio.position      = [ MONO ]
+                node.name             = "apollo_mic_4"
+                media.class           = "Audio/Source"
+                audio.position        = [ MONO ]
             }
         }
     }
@@ -226,23 +227,23 @@ context.modules = [
         args = {
             node.description = "Apollo Line In 3+4"
             capture.props = {
-                audio.position      = [ AUX2 AUX3 ]
-                stream.dont-remix   = true
-                node.target         = "$INPUT_NODE"
-                node.passive        = true
+                audio.position        = [ AUX2 AUX3 ]
+                stream.dont-remix     = true
+                node.target           = "$INPUT_NODE"
+                node.passive          = true
             }
             playback.props = {
-                node.name           = "apollo_line_34"
-                media.class         = "Audio/Source"
-                audio.position      = [ FL FR ]
+                node.name             = "apollo_line_34"
+                media.class           = "Audio/Source"
+                audio.position        = [ FL FR ]
             }
         }
     }
 
     # ═══════════════════════════════════════════
     # PLAYBACK SINKS (PipeWire → Apollo)
-    # Pattern: capture side = Audio/Sink (apps write here),
-    # playback side targets ALSA output (NOT passive — must drive output).
+    # capture side = Audio/Sink (apps write here)
+    # playback side: target.object → ALSA output, stream.dont-remix, NOT passive
     # ═══════════════════════════════════════════
 
     # Monitor L/R (main speakers)
@@ -250,14 +251,14 @@ context.modules = [
         args = {
             node.description = "Apollo Monitor L/R"
             capture.props = {
-                node.name           = "apollo_monitor"
-                media.class         = "Audio/Sink"
-                audio.position      = [ FL FR ]
+                node.name             = "apollo_monitor"
+                media.class           = "Audio/Sink"
+                audio.position        = [ FL FR ]
             }
             playback.props = {
-                node.target         = "$OUTPUT_NODE"
-                audio.position      = [ AUX0 AUX1 ]
-                stream.dont-remix   = true
+                node.target           = "$OUTPUT_NODE"
+                audio.position        = [ AUX0 AUX1 ]
+                stream.dont-remix     = true
             }
         }
     }
@@ -267,14 +268,14 @@ context.modules = [
         args = {
             node.description = "Apollo Line Out 1+2"
             capture.props = {
-                node.name           = "apollo_line_out_12"
-                media.class         = "Audio/Sink"
-                audio.position      = [ FL FR ]
+                node.name             = "apollo_line_out_12"
+                media.class           = "Audio/Sink"
+                audio.position        = [ FL FR ]
             }
             playback.props = {
-                node.target         = "$OUTPUT_NODE"
-                audio.position      = [ AUX2 AUX3 ]
-                stream.dont-remix   = true
+                node.target           = "$OUTPUT_NODE"
+                audio.position        = [ AUX2 AUX3 ]
+                stream.dont-remix     = true
             }
         }
     }
@@ -284,14 +285,14 @@ context.modules = [
         args = {
             node.description = "Apollo Line Out 3+4"
             capture.props = {
-                node.name           = "apollo_line_out_34"
-                media.class         = "Audio/Sink"
-                audio.position      = [ FL FR ]
+                node.name             = "apollo_line_out_34"
+                media.class           = "Audio/Sink"
+                audio.position        = [ FL FR ]
             }
             playback.props = {
-                node.target         = "$OUTPUT_NODE"
-                audio.position      = [ AUX4 AUX5 ]
-                stream.dont-remix   = true
+                node.target           = "$OUTPUT_NODE"
+                audio.position        = [ AUX4 AUX5 ]
+                stream.dont-remix     = true
             }
         }
     }
