@@ -14,7 +14,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPORT_FILE="/tmp/open-apollo-install-report.json"
-TELEMETRY_URL="https://api.openapollo.org/reports"
+TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
 VERSION="0.1.0"
 
 # --- Flags ---
