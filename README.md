@@ -8,24 +8,45 @@
 
 **Open-source Linux driver for Universal Audio Apollo Thunderbolt interfaces**
 
-Open Apollo brings full Linux support to Universal Audio's Apollo
+Open Apollo brings Linux support to Universal Audio's Apollo
 Thunderbolt audio interfaces. Built through clean-room reverse engineering,
 this community-driven project provides a native kernel driver, userspace
-mixer daemon, and system tray indicator. Verified on the Apollo x4 with
-clean playback and recording on Ubuntu 24.04 and Fedora 43.
+mixer daemon, and system tray indicator.
 
-## Current Status (Apollo x4)
+> **⚠️ Experimental** — This project is under active development and not yet ready
+> for production use. Expect rough edges, kernel stability issues on some
+> configurations, and incomplete features. We're shipping early to get community
+> feedback and testing across different Apollo models.
+
+## What Works (Apollo x4, Ubuntu 24.04)
 
 - **Full duplex audio** — 24 playback + 22 capture channels via ALSA
 - **All sample rates** — 44.1, 48, 88.2, 96, 176.4, 192 kHz
 - **Preamp control** — gain, 48V phantom power, PAD, low cut, phase invert, mic/line switching
 - **Monitor control** — volume, mute, dim, mono, headphone routing
 - **DSP mixer** — input faders, pan, sends (AUX1/AUX2, CUE1/CUE2), solo, mute
-- **PipeWire/ALSA** — 50 ALSA mixer controls, WirePlumber and UCM2 configs included; virtual I/O devices via `apollo-setup-io`
-- **System tray indicator** — real-time status, one-click init, daemon control
-- **One-command install** — `sudo bash scripts/install.sh` handles everything; tested 8/8 cycles on Ubuntu 24.04
+- **PipeWire virtual I/O** — named Mic 1-4, Line In 3+4, Monitor L/R, Line Out devices
+- **Desktop audio** — YouTube, system sounds, GNOME volume control all work through Apollo Monitor
+- **WebRTC capture** — clean audio in Chromium-based browsers (webcam mic tests, Discord web)
+- **pw-record/pw-play** — zero-dropout capture and playback verified
+- **Guided installer** — `sudo bash scripts/install.sh` with hardware validation gates + audio test
+- **System tray indicator** — real-time hardware status
 
-**Not yet implemented:** talkback, virtual/monitor loopback, console UI, multi-device support
+## Known Issues
+
+| Issue | Severity | Workaround |
+|-------|----------|------------|
+| **Firefox Snap crashes** — kernel `hrtimer` lockup when using WebRTC capture | Critical | Use Chromium or Firefox .deb instead of Snap |
+| **Raw pro-audio node crash** — apps selecting "Apollo x4 Pro" (22ch) as input can hang the system | Critical | Default source is set to Mic 1; avoid selecting the raw multichannel device |
+| **WebRTC capture quality** — minor artifacts in browser capture vs perfect pw-record | Minor | Use `pw-record` for clean recording; browser capture is usable but not studio-grade |
+| **Ardour JACK routing** — Ardour via JACK can steal ALSA device from PipeWire | Moderate | Launch with `pw-jack ardour7`; restart PipeWire if audio stops |
+| **Audacity ALSA-only** — Ubuntu's Audacity package lacks PipeWire backend | Minor | Install Audacity via Flatpak for PipeWire support |
+| **GNOME Sound Settings** — input level meter may not show activity | Cosmetic | Audio works; meter is a GNOME UI limitation with pro-audio devices |
+| **Thunderbolt link instability** — fresh boot with Apollo on may need power cycle | Moderate | Install script guides through power cycle; `apollo-setup-io` recovers |
+
+## Not Yet Implemented
+
+Talkback, virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD plugins require PACE licensing — not planned)
 
 ## Supported Devices
 
@@ -59,31 +80,35 @@ We need community testers to verify each one.
 
 ### Install
 
-**Power off the Apollo before running the installer** — DKMS auto-loading while the device is connected can hang the system.
-
 ```bash
-git clone https://github.com/open-apollo/open-apollo.git
+git clone https://github.com/rolotrealanis98/open-apollo.git
 cd open-apollo
 sudo bash scripts/install.sh
 ```
 
-The installer handles dependencies, kernel module build, DKMS registration, IOMMU detection, and PipeWire/WirePlumber config deployment.
+The installer is a guided walkthrough that:
+1. Installs dependencies, builds the driver, sets up DKMS
+2. Deploys PipeWire/WirePlumber/UCM2 configs
+3. Guides you through an Apollo power cycle for clean Thunderbolt initialization
+4. Loads the driver, verifies DSP handshake, sets up virtual I/O devices
+5. Starts the mixer daemon and tray indicator
+6. Plays a test tone so you can verify audio output
 
-### Post-install: power on and configure I/O
+### Uninstall
 
-After install completes:
+```bash
+sudo bash scripts/uninstall.sh
+```
 
-1. Power on the Apollo and wait ~20 seconds for Thunderbolt enumeration
-2. Run the init script (loads firmware, activates DSP, starts the daemon):
-   ```bash
-   sudo bash tools/apollo-init.sh
-   ```
-3. Set up virtual I/O devices (run once per session, or automate via udev/systemd):
-   ```bash
-   apollo-setup-io
-   ```
+Removes driver, DKMS, all configs, services, and guides you through Apollo power-off for clean module unload.
 
-The `apollo-setup-io` command discovers the Apollo's PCI address at runtime, sets the pro-audio PipeWire profile, and creates named virtual devices for each input and output group.
+### Troubleshooting
+
+If audio stops working after using a JACK app (Ardour, etc):
+```bash
+systemctl --user restart pipewire wireplumber pipewire-pulse
+apollo-setup-io
+```
 
 ### Virtual I/O devices (Apollo x4)
 
