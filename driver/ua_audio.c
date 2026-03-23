@@ -1137,15 +1137,17 @@ post_handshake:
 						 "plugin chain skipped (clobbers capture)\n");
 
 				/*
-				 * Restart transport for DSP service.
+				 * Do NOT start transport here during connect.
+				 * Starting transport on an unstable TB link
+				 * causes immediate PCIe AER errors and link
+				 * death.  Let pcm_prepare start transport
+				 * when audio actually needs to flow.
+				 *
+				 * The DSP service loop reads readback regs
+				 * which work without transport running.
 				 */
-				ua_write(ua, UA_REG_AX_CONTROL,
-					 UA_AX_CTRL_DMA_EN);
-				usleep_range(1000, 2000);
-				ua_write(ua, UA_REG_AX_CONTROL,
-					 UA_AX_CTRL_START_EXT);
 				dev_info(&ua->pdev->dev,
-					 "  transport restarted\n");
+					 "  connect complete (transport deferred to pcm_prepare)\n");
 
 				return 0;
 			}
