@@ -258,7 +258,7 @@ check_install_deps() {
         case "$PKG_MGR" in
             dnf)    missing_pkgs+=("pipewire") ;;
             apt)    missing_pkgs+=("pipewire") ;;
-            pacman) missing_pkgs+=("pipewire") ;;
+            pacman) missing_pkgs+=("pipewire" "pipewire-alsa" "pipewire-pulse") ;;
             zypper) missing_pkgs+=("pipewire") ;;
         esac
     else
