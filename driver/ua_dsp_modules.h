@@ -2,11 +2,11 @@
 /*
  * DSP module SRAM configuration data for Apollo x4
  *
- * Captured from Windows UAD driver ring buffer (DSP 0).
+ * Captured from Windows UAD driver ring buffer (DSP 0) on 2026-03-19.
  * Each module gets: SRAM clears → DMA header → DMA I/O descriptor.
  * After all modules: EnableSynchProcessing + RoutingEnable commands.
  *
- * Reference: tools/captures/win-dsp0-ring-complete.json
+ * Reference: tools/captures/win-dsp0-ring-complete-20260319.json
  */
 
 #ifndef UA_DSP_MODULES_H

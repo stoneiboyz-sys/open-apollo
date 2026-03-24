@@ -441,6 +441,12 @@ static void ua_dsp_service_handler(struct work_struct *work)
 	u32 data[UA_MIXER_RB_WORDS];
 	unsigned int i;
 
+	/* Device removed — stop servicing */
+	if (atomic_read(&ua->shutdown)) {
+		audio->dsp_service_running = false;
+		return;
+	}
+
 	mutex_lock(&ua->lock);
 
 	/*
@@ -1816,6 +1822,9 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	struct snd_pcm_runtime *runtime = sub->runtime;
 	unsigned long flags;
 
+	if (atomic_read(&ua->shutdown))
+		return -ENODEV;
+
 	dev_info(&ua->pdev->dev,
 		 "pcm_open: stream=%s connected=%d transport=%d\n",
 		 sub->stream == SNDRV_PCM_STREAM_PLAYBACK ? "play" : "rec",
@@ -1915,6 +1924,9 @@ static int ua_pcm_copy(struct snd_pcm_substream *sub, int channel,
 	struct ua_audio *audio = &ua->audio;
 	struct snd_pcm_runtime *rt = sub->runtime;
 	unsigned int user_frame_sz = frames_to_bytes(rt, 1);
+
+	if (atomic_read(&ua->shutdown))
+		return -ENODEV;
 	unsigned int hw_ch, hw_frame_sz;
 	char *dma_buf;
 	unsigned long frames, start_frame, i;
@@ -2030,6 +2042,9 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	struct ua_audio *audio = &ua->audio;
 	int ret;
+
+	if (atomic_read(&ua->shutdown))
+		return -ENODEV;
 
 	dev_info(&ua->pdev->dev,
 		 "pcm_prepare: stream=%s rate=%u channels=%u period=%lu buffer=%lu "
@@ -2189,6 +2204,12 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 	if (!audio->period_timer_running || !audio->transport_running)
 		return HRTIMER_NORESTART;
 
+	/* Device removed — stop timer immediately */
+	if (atomic_read(&ua->shutdown)) {
+		audio->period_timer_running = false;
+		return HRTIMER_NORESTART;
+	}
+
 	sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
 	if (sp == 0xFFFFFFFF) {
 		audio->period_timer_running = false;
@@ -2226,6 +2247,9 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	struct ua_audio *audio = &ua->audio;
 
+	if (atomic_read(&ua->shutdown))
+		return -ENODEV;
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
@@ -2257,6 +2281,9 @@ static snd_pcm_uframes_t ua_pcm_pointer(struct snd_pcm_substream *sub)
 {
 	struct ua_device *ua = snd_pcm_substream_chip(sub);
 	u32 sp;
+
+	if (atomic_read(&ua->shutdown))
+		return SNDRV_PCM_POS_XRUN;
 
 	/*
 	 * Read hardware sample position.
@@ -2306,6 +2333,9 @@ void ua_audio_irq(struct ua_device *ua, u32 status_lo, u32 status_hi)
 	struct ua_audio *audio = &ua->audio;
 	static unsigned int irq_count;
 	u32 sp;
+
+	if (atomic_read(&ua->shutdown))
+		return;
 
 	if (!audio->transport_running)
 		return;

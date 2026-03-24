@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * DSP audio routing programs for Apollo x4
- * Captured via DTrace from macOS UAD2System.kext
+ * Captured via DTrace from macOS UAD2System.kext 2026-03-18
  * Magic: "Bill" + module_id (u32 LE)
  */
 
@@ -203,7 +203,7 @@ static const u8 ua_dsp_prog_db[728] = {
 };
 
 /* DSP program 0x020000EB input routing (716 bytes) */
-/* Captured via DTrace SendBlock, macOS */
+/* Captured via DTrace SendBlock, macOS 2026-03-18 */
 static const u8 ua_dsp_prog_eb[716] = {
 	0x42, 0x69, 0x6c, 0x6c, 0xeb, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
 	0xb8, 0x02, 0x00, 0x00, 0xa2, 0x00, 0x00, 0x00, 0x25, 0xff, 0x39, 0x6c,
@@ -268,7 +268,7 @@ static const u8 ua_dsp_prog_eb[716] = {
 };
 
 /* DSP program 0x0200012B talkback/monitor (452 bytes) */
-/* Captured via DTrace SendBlock, macOS */
+/* Captured via DTrace SendBlock, macOS 2026-03-18 */
 static const u8 ua_dsp_prog_12b[452] = {
 	0x42, 0x69, 0x6c, 0x6c, 0x2b, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
 	0xb0, 0x01, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x13, 0xa9, 0xf0, 0x97,

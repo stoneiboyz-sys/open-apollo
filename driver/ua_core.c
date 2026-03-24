@@ -2,7 +2,7 @@
 /*
  * Universal Audio Apollo Thunderbolt — Linux PCIe Driver
  *
- * Copyright (c) 2026 open-apollo contributors
+ * Copyright (c) 2026 apollo-linux contributors
  *
  * Reverse engineered from UAD2System.kext v11.8.1 (com.uaudio.driver.UAD2System)
  * and UAD-2 SDK Support.framework.
@@ -79,6 +79,10 @@ static irqreturn_t ua_irq_handler(int irq, void *data)
 	struct ua_device *ua = data;
 	u32 status_lo, status_hi = 0;
 	unsigned long flags;
+
+	/* Device removed — don't touch BAR0 */
+	if (atomic_read(&ua->shutdown))
+		return IRQ_NONE;
 
 	spin_lock_irqsave(&ua->irq_lock, flags);
 
@@ -634,8 +638,8 @@ int ua_mixer_write_setting_locked(struct ua_device *ua,
  * Called from the DSP service loop at 10 Hz.  Matches the kext's
  * _flushCachedSettings which is called from GetReadback at ~33Hz.
  *
- * Windows BAR0 capture proves: val AND mask persist across flushes.
- * The DSP reads val/mask on every SEQ bump.
+ * Windows BAR0 capture (2026-03-20) proves: val AND mask persist
+ * across flushes. The DSP reads val/mask on every SEQ bump.
  * Do NOT clear mask after writing — gain requires persistent values.
  */
 void ua_mixer_flush_settings(struct ua_device *ua)
@@ -656,11 +660,11 @@ void ua_mixer_flush_settings(struct ua_device *ua)
 	 * Word A = (mask[15:0] << 16) | val[15:0]
 	 * Word B = (mask[31:16] << 16) | val[31:16]
 	 *
-	 * Windows BAR0 capture proves: val AND mask persist across flushes.
-	 * The DSP reads val/mask on every SEQ bump.
+	 * Windows BAR0 capture (2026-03-20) proves: val AND mask persist
+	 * across flushes. The DSP reads val/mask on every SEQ bump.
 	 * Do NOT clear mask after writing — gain requires persistent values.
 	 *
-	 * Word order tested: swapping words for settings 0-31
+	 * Word order tested (2026-03-21): swapping words for settings 0-31
 	 * does NOT fix monitor. Single-setting[2] write with SEQ bump also
 	 * fails. Issue is DSP module activation, not word encoding.
 	 */
@@ -841,7 +845,7 @@ int ua_monitor_set_param(struct ua_device *ua, unsigned int ch_idx,
 		break;
 	case UA_MON_PARAM_MUTE:		/* 0x03 -> bits[17:16] */
 		/*
-		 * 3-state (VERIFIED via DTrace):
+		 * 3-state (VERIFIED 2026-02-20):
 		 *   value=0: unmuted, stereo -> bits[17:16] = 00
 		 *   value=1: mono (MixToMono) -> bit 17 set
 		 *   value=2: muted            -> bit 16 set
@@ -2022,6 +2026,10 @@ static long ua_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct ua_device *ua = filp->private_data;
 
+	/* Device removed — reject all ioctls */
+	if (atomic_read(&ua->shutdown))
+		return -ENODEV;
+
 	switch (cmd) {
 	case UA_IOCTL_GET_DEVICE_INFO:
 		return ua_ioctl_get_device_info(ua, arg);
@@ -2353,10 +2361,10 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 		 * ua_boot_transport_start() programs all transport regs,
 		 * starts transport, does ACEFACE, and pulses DMA reset.
 		 *
-		 * Discovered: just AX_CONTROL=0x20F alone is insufficient
-		 * — all transport regs must be set first.
+		 * Discovered 2026-03-01: just AX_CONTROL=0x20F alone is
+		 * insufficient — all transport regs must be set first.
 		 *
-		 * IOMMU FIX: ua_audio_preinit_dma() MUST be
+		 * IOMMU FIX (2026-03-09): ua_audio_preinit_dma() MUST be
 		 * called before ua_boot_transport_start().  When transport
 		 * starts, the FPGA immediately begins audio DMA using the
 		 * SG table in BAR0 SRAM.  Without pre-allocation, all SG
@@ -2374,7 +2382,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 
 			/*
 			 * Set clock source for Apollo x4 internal clock.
-			 * DTrace RE: macOS uses source=0xC
+			 * DTrace RE (2026-03-09): macOS uses source=0xC
 			 * (value 0x020C for 48kHz). Source=0 (0x0200) gets
 			 * no FPGA ack. Pre-ACEFACE clock write doesn't work
 			 * because notification status (0xC030) isn't configured
@@ -2488,7 +2496,7 @@ static int ua_dsp_init_and_load(struct ua_device *ua)
 	 * mode but BREAKS playback (no audio output). Without it, DSP
 	 * stays in default passthrough mode where playback works.
 	 * Capture needs this write but it breaks playback.
-	 * (confirmed: playback broken with clock write)
+	 * (2026-03-18: confirmed playback broken with clock write)
 	 */
 #if 0
 	if (ua_uses_audio_extension(ua->device_type) && ua->aceface_done) {
@@ -2727,29 +2735,66 @@ err_free_irq_vectors:
 static void ua_remove(struct pci_dev *pdev)
 {
 	struct ua_device *ua = pci_get_drvdata(pdev);
+	bool dead = !pci_device_is_present(pdev);
 
-	/* Tear down DSP ring buffers (frees DMA pages) */
-	ua_dsp_rings_fini(ua);
+	dev_info(&pdev->dev, "ua_remove: surprise=%d\n", dead);
 
-	/* Tear down audio subsystem (stops transport, frees DMA) */
-	ua_audio_fini(ua);
+	/*
+	 * 1. Set shutdown flag — blocks new BAR0 access via ua_read/ua_write
+	 *    guards, rejects new ioctls, and stops PCM ops.
+	 */
+	atomic_set(&ua->shutdown, 1);
 
-	/* Stop transport (belt and suspenders) */
-	ua_write(ua, UA_REG_TRANSPORT, 0);
-
-	/* Disable interrupts */
-	ua_write(ua, UA_REG_IRQ_ENABLE, 0);
+	/*
+	 * 2. Drain IRQ — synchronize_irq ensures any in-flight handler
+	 *    finishes, then free_irq removes it.  Must happen before
+	 *    tearing down any state the handler references.
+	 */
 	ua->irq_mask_lo = 0;
-	if (ua->fw_v2) {
-		ua_write(ua, UA_REG_EXT_IRQ_ENABLE, 0);
-		ua->irq_mask_hi = 0;
+	ua->irq_mask_hi = 0;
+	free_irq(pci_irq_vector(pdev, 0), ua);
+	pci_free_irq_vectors(pdev);
+
+	/*
+	 * 3. Stop hrtimer — may be running from PCM trigger.
+	 *    Safe to call hrtimer_cancel here (process context).
+	 */
+	ua->audio.period_timer_running = false;
+	hrtimer_cancel(&ua->audio.period_timer);
+
+	/*
+	 * 4. Stop DSP service workqueue (blocks until handler returns).
+	 */
+	ua_dsp_service_stop(ua);
+
+	/*
+	 * 5. If device is still present (normal remove / reboot),
+	 *    stop DMA engine and wait for firmware to drain.
+	 *    Use iowrite32 directly — shutdown flag blocks ua_write.
+	 */
+	if (!dead) {
+		iowrite32(0, ua->regs + UA_REG_AX_CONTROL);
+		iowrite32(0, ua->regs + UA_REG_TRANSPORT);
+		iowrite32(0, ua->regs + UA_REG_IRQ_ENABLE);
+		if (ua->fw_v2)
+			iowrite32(0, ua->regs + UA_REG_EXT_IRQ_ENABLE);
+		msleep(100);
 	}
 
+	/*
+	 * 6. Tear down audio subsystem — disconnects ALSA card,
+	 *    frees DMA buffers.  ua_write calls inside are noops
+	 *    (shutdown flag set), which is correct for surprise removal.
+	 */
+	ua_audio_fini(ua);
+
+	/* 7. Free DSP ring pages */
+	ua_dsp_rings_fini(ua);
+
+	/* 8. Cleanup chardev and IDA */
 	device_destroy(ua_class, MKDEV(MAJOR(ua_devno), ua->dev_id));
 	cdev_del(&ua->cdev);
 	ida_free(&ua_ida, ua->dev_id);
-	free_irq(pci_irq_vector(pdev, 0), ua);
-	pci_free_irq_vectors(pdev);
 }
 
 /* ----------------------------------------------------------------
@@ -2763,6 +2808,9 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 
 	dev_warn(&pdev->dev, "PCIe error detected (state %d)\n", state);
 
+	/* Block all new BAR0 access */
+	atomic_set(&ua->shutdown, 1);
+
 	/* Stop DSP service loop before touching hardware state */
 	ua_dsp_service_stop(ua);
 
@@ -2770,7 +2818,7 @@ static pci_ers_result_t ua_error_detected(struct pci_dev *pdev,
 	ua->audio.connected = false;
 	ua->audio.transport_running = false;
 
-	/* Clear cached IRQ masks — don't write to potentially-gone BAR0 */
+	/* Clear cached IRQ masks */
 	ua->irq_mask_lo = 0;
 	ua->irq_mask_hi = 0;
 
@@ -2813,6 +2861,9 @@ static void ua_io_resume(struct pci_dev *pdev)
 	struct ua_device *ua = pci_get_drvdata(pdev);
 
 	dev_info(&pdev->dev, "I/O resumed\n");
+
+	/* Clear shutdown flag — device is back */
+	atomic_set(&ua->shutdown, 0);
 
 	/*
 	 * After PCIe AER slot reset, the DSP service was stopped.
@@ -2887,4 +2938,4 @@ module_exit(ua_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_VERSION(DRIVER_VERSION);
-MODULE_AUTHOR("open-apollo contributors");
+MODULE_AUTHOR("apollo-linux contributors");

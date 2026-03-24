@@ -757,16 +757,23 @@ struct ua_device {
 	/* Synchronization */
 	struct mutex lock;          /* Device access lock */
 	spinlock_t irq_lock;        /* Interrupt handler lock */
+
+	/* Surprise removal (Thunderbolt hot-unplug) */
+	atomic_t shutdown;          /* Set on remove/disconnect — blocks BAR0 access */
 };
 
-/* Register access helpers */
+/* Register access helpers — guarded against surprise removal */
 static inline u32 ua_read(struct ua_device *ua, u32 offset)
 {
+	if (unlikely(atomic_read(&ua->shutdown)))
+		return 0xFFFFFFFF;
 	return ioread32(ua->regs + offset);
 }
 
 static inline void ua_write(struct ua_device *ua, u32 offset, u32 value)
 {
+	if (unlikely(atomic_read(&ua->shutdown)))
+		return;
 	iowrite32(value, ua->regs + offset);
 }
 

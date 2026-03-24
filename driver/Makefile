@@ -2,11 +2,11 @@
 #
 # Universal Audio Apollo PCIe driver
 #
-# Build from driver/ directory:
-#   make
+# Out-of-tree build:
+#   make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
 #
-# Build from repo root:
-#   make -C driver
+# Clean:
+#   make -C /lib/modules/$(uname -r)/build M=$(pwd) clean
 
 obj-m := ua_apollo.o
 ua_apollo-y := ua_core.o ua_audio.o ua_dsp.o

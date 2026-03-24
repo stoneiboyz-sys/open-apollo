@@ -2,7 +2,7 @@
 /*
  * Universal Audio Apollo — Userspace ioctl interface
  *
- * Copyright (c) 2026 open-apollo contributors
+ * Copyright (c) 2026 apollo-linux contributors
  */
 
 #ifndef UA_IOCTL_H
@@ -104,7 +104,7 @@ struct ua_mixer_bus_param {
 	__u32 flags;		/* Always 0x02 from captures */
 };
 /*
- * Complete Bus ID map (Apollo x4, verified via DTrace):
+ * Complete Bus ID map (Apollo x4, verified Phase 3e 2026-02-19):
  *   0x0000-0x0003: Analog In 1-4 (mono, mic/line)
  *   0x0004-0x0005: CUE1 L/R (output mix bus)
  *   0x0006-0x0007: CUE2 L/R (output mix bus)

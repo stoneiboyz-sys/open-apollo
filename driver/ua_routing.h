@@ -2,11 +2,11 @@
 /*
  * Universal Audio Apollo Thunderbolt - Routing Table Definitions
  *
- * Copyright (c) 2026 open-apollo contributors
+ * Copyright (c) 2026 apollo-linux contributors
  *
  * DMA channel routing tables for Apollo Thunderbolt interfaces.
- * DTrace-captured from macOS UAD2System.kext (SEL171 RT data).
- * 100% coverage of record and playback channel maps.
+ * DTrace-captured from macOS UAD2System.kext (SEL171 RT data),
+ * 2026-02-27 -- 100% coverage of record and playback channel maps.
  *
  * Binary format (RT171 entry encoding):
  *   Header:    4 x u32  {unused, direction, unused, num_channels}
@@ -380,7 +380,7 @@ static const char * const ua_x4_play_names[24] = {
 /*
  * Apollo x4 IO Descriptor SRAM Data
  *
- * Captured from macOS warm boot BAR0 dump.
+ * Captured from macOS warm boot BAR0 dump (2026-03-18).
  * Format: 6-word header + packed 16-bit channel pairs + 0x00FF00FF padding.
  *
  * Header layout:

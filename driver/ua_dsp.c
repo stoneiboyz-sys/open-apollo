@@ -2,7 +2,7 @@
 /*
  * Universal Audio Apollo — DSP Ring Buffer & Firmware Loading
  *
- * Copyright (c) 2026 open-apollo contributors
+ * Copyright (c) 2026 apollo-linux contributors
  *
  * Reverse-engineered from UAD2System.kext v11.8.1:
  *   CPcieRingBuffer — ring buffer management
@@ -333,7 +333,7 @@ int ua_dsp_rings_init(struct ua_device *ua)
 		 * CRITICAL: Pulse DMA reset with engines already enabled.
 		 * Without this, the FPGA ring buffer engine stays dormant
 		 * and ignores doorbells (POSITION stuck at 0).
-		 * Discovered empirically: reset-while-enabled
+		 * Discovered empirically 2026-03-01: reset-while-enabled
 		 * kicks the ring buffer DMA engine into active state.
 		 */
 		ua_write(ua, UA_REG_DMA_CTRL,
@@ -2272,7 +2272,7 @@ int ua_dsp_connect_all(struct ua_device *ua)
  * coefficients work) but the mixer task never starts, so SRAM-based
  * parameter writes are ignored.
  *
- * Data extracted from tools/captures/win-dsp0-ring-complete.json
+ * Data extracted from tools/captures/win-dsp0-ring-complete-20260319.json
  */
 int ua_dsp_activate_plugin_chain(struct ua_device *ua)
 {
@@ -2567,7 +2567,7 @@ void ua_dsp_flush_bus_params(struct ua_device *ua)
  *   4. EnableSynchProcessing for modules 0 and 1
  *   5. RoutingEnable commands
  *
- * Data source: tools/captures/win-dsp0-ring-complete.json
+ * Data source: tools/captures/win-dsp0-ring-complete-20260319.json
  * ---------------------------------------------------------------- */
 
 /**
@@ -2713,10 +2713,32 @@ int ua_dsp_configure_modules(struct ua_device *ua)
 		mod = &ua_x4_modules[i];
 
 		/*
-		 * SRAM clears REMOVED — they destroy firmware's
+		 * General SRAM clears REMOVED — they destroy firmware's
 		 * default mixer output routing on cold boot.
-		 * The SRAM is empty after FW load anyway.
+		 *
+		 * EXCEPTION: Module 0 talkback aux SRAM at 0xC6FF6 (8dw)
+		 * and extra params at 0x9D18E (4dw) must be cleared.
+		 * These are at unique addresses that don't overlap capture
+		 * routing. Without them, talkback DMA channels return zeros.
+		 * (Windows entries 155-156)
 		 */
+		if (i == 0) {
+			ent = (struct ua_ring_entry){
+				.word0 = cpu_to_le32(0x00080004),
+				.word1 = cpu_to_le32(0x000C6FF6),
+				.word2 = 0,
+				.word3 = cpu_to_le32(8),
+			};
+			ua_dsp_ring_put_entry(&ds->cmd, &ent);
+
+			ent = (struct ua_ring_entry){
+				.word0 = cpu_to_le32(0x00080004),
+				.word1 = cpu_to_le32(0x0009D18E),
+				.word2 = 0,
+				.word3 = cpu_to_le32(4),
+			};
+			ua_dsp_ring_put_entry(&ds->cmd, &ent);
+		}
 
 		/* DMA: write zeros to header area (matches Windows entry) */
 		ent = (struct ua_ring_entry){
@@ -2878,7 +2900,7 @@ out_free:
  * The IO descriptor regions at 0xC1A4 (input) and 0xC2C4 (output)
  * tell the FPGA/DSP how to map DMA channels to audio signals.
  *
- * macOS format (BAR0 dump captured):
+ * macOS format (BAR0 dump captured 2026-03-18):
  *   6-word header + packed 16-bit channel pairs + 0x00FF00FF padding
  *
  * Linux was writing raw 32-bit channel IDs with no header — wrong
@@ -2941,7 +2963,7 @@ int ua_dsp_send_routing(struct ua_device *ua)
  * ua_dsp_load_programs - Send DSP audio routing programs to DSP 0
  *
  * Loads the mixer core, output routing, and capture routing programs
- * captured from macOS kext via DTrace. These programs
+ * captured from macOS kext via DTrace (2026-03-18). These programs
  * tell the DSP how to route audio between preamp inputs, mix buses,
  * and DMA record/playback channels.
  *

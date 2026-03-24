@@ -14,7 +14,11 @@ from typing import Any
 
 try:
     import websockets
-    from websockets.asyncio.server import serve, ServerConnection
+    try:
+        from websockets.asyncio.server import serve, ServerConnection
+    except (ImportError, AttributeError):
+        # websockets < 13.0 (e.g. Ubuntu apt package 10.x)
+        serve = websockets.serve
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False

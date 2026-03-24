@@ -45,6 +45,21 @@ mixer daemon, and system tray indicator.
 | **GNOME Sound Settings** — input level meter may not show activity | Cosmetic | Audio works; meter is a GNOME UI limitation with pro-audio devices |
 | **Thunderbolt link instability** — fresh boot with Apollo on may need power cycle | Moderate | Install script guides through power cycle; `apollo-setup-io` recovers |
 
+## App Compatibility
+
+| App | Status | Notes |
+|-----|--------|-------|
+| **Chromium / Chrome** | Verified | Recommended browser for WebRTC capture |
+| **Firefox .deb** | Untested | Should work; Snap version crashes (see Known Issues) |
+| **Discord .deb** | Untested | Expected to work via PulseAudio bridge |
+| **OBS Studio** | Untested | Should work natively with PipeWire |
+| **Ardour** | Partial | Use `pw-jack ardour7`; don't let it grab ALSA directly |
+| **Audacity** | Partial | Flatpak version only (Ubuntu .deb lacks PipeWire backend) |
+| **pw-record / pw-play** | Verified | Zero-drift, cleanest capture path |
+| **REAPER** | Untested | Expected to work via `pw-jack` |
+
+**Recommendation:** Use Chromium-based browsers for WebRTC. Use native PipeWire apps (`pw-record`, Ardour, OBS) for studio-quality recording with zero clock drift.
+
 ## Not Yet Implemented
 
 Virtual/monitor loopback, console UI, multi-device support, plugin chain (UAD plugins require PACE licensing — not planned)

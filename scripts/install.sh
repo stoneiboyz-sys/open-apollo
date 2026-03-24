@@ -138,6 +138,8 @@ detect_distro() {
         fedora|rhel|centos) PKG_MGR="dnf" ;;
         ubuntu|debian|pop|linuxmint) PKG_MGR="apt" ;;
         arch|manjaro|endeavouros) PKG_MGR="pacman" ;;
+        opensuse*|sles) PKG_MGR="zypper" ;;
+        nixos) PKG_MGR="nix" ;;
         *)
             PKG_MGR=""
             warn "Unsupported distro: $DISTRO_ID — dependency install will be manual"
@@ -175,6 +177,31 @@ detect_distro() {
 check_install_deps() {
     header "Dependencies"
 
+    # NixOS: dependencies should be declared in configuration.nix, not installed imperatively
+    if [ "$PKG_MGR" = "nix" ]; then
+        warn "NixOS detected — install dependencies declaratively in configuration.nix"
+        info "Required packages: gcc, gnumake, linux-headers, python3, python3-websockets,"
+        info "  pipewire, wireplumber, alsa-utils, dkms, pciutils, usbutils"
+        info "Then run: sudo nixos-rebuild switch"
+        echo ""
+        # Still check if the tools are present
+        local nix_missing=()
+        command -v gcc &>/dev/null    || nix_missing+=("gcc")
+        command -v make &>/dev/null   || nix_missing+=("make")
+        command -v python3 &>/dev/null || nix_missing+=("python3")
+        [ -d "/lib/modules/$(uname -r)/build" ] || nix_missing+=("kernel headers")
+        if [ ${#nix_missing[@]} -eq 0 ]; then
+            ok "All required tools present"
+            STEP_STATUS[deps]="ok"
+            STEP_DETAIL[deps]="NixOS — tools verified"
+        else
+            warn "Missing: ${nix_missing[*]}"
+            STEP_STATUS[deps]="manual"
+            STEP_DETAIL[deps]="NixOS — add to configuration.nix: ${nix_missing[*]}"
+        fi
+        return 0
+    fi
+
     local missing=()
     local missing_pkgs=()
 
@@ -185,6 +212,7 @@ check_install_deps() {
             dnf)    missing_pkgs+=("kernel-devel") ;;
             apt)    missing_pkgs+=("linux-headers-$(uname -r)") ;;
             pacman) missing_pkgs+=("linux-headers") ;;
+            zypper) missing_pkgs+=("kernel-devel") ;;
         esac
     else
         ok "Kernel headers"
@@ -231,6 +259,7 @@ check_install_deps() {
             dnf)    missing_pkgs+=("pipewire") ;;
             apt)    missing_pkgs+=("pipewire") ;;
             pacman) missing_pkgs+=("pipewire") ;;
+            zypper) missing_pkgs+=("pipewire") ;;
         esac
     else
         ok "pipewire${PW_VER:+ ($PW_VER)}"
@@ -241,6 +270,7 @@ check_install_deps() {
             dnf)    missing_pkgs+=("wireplumber") ;;
             apt)    missing_pkgs+=("wireplumber") ;;
             pacman) missing_pkgs+=("wireplumber") ;;
+            zypper) missing_pkgs+=("wireplumber") ;;
         esac
     else
         ok "wireplumber${WP_VER:+ ($WP_VER)}"
@@ -258,6 +288,7 @@ check_install_deps() {
             dnf)    missing_pkgs+=("libappindicator-gtk3") ;;
             apt)    missing_pkgs+=("gir1.2-appindicator3-0.1") ;;
             pacman) missing_pkgs+=("libappindicator-gtk3") ;;
+            zypper) missing_pkgs+=("typelib-1_0-AppIndicator3-0_1") ;;
         esac
     else
         ok "appindicator"
@@ -286,6 +317,7 @@ check_install_deps() {
         dnf)    install_cmd="dnf install -y ${missing_pkgs[*]}" ;;
         apt)    install_cmd="apt-get install -y ${missing_pkgs[*]}" ;;
         pacman) install_cmd="pacman -S --noconfirm ${missing_pkgs[*]}" ;;
+        zypper) install_cmd="zypper install -y ${missing_pkgs[*]}" ;;
     esac
 
     read -rp "Install missing deps with: sudo $install_cmd ? [Y/n] " answer
@@ -439,7 +471,13 @@ check_iommu() {
     info "This will prevent the Apollo from working (BAR0 reads fail)"
     echo ""
 
-    if [ -f /etc/default/grub ]; then
+    # NixOS: kernel params go in configuration.nix
+    if [ "$DISTRO_ID" = "nixos" ]; then
+        warn "NixOS: add iommu=pt to your configuration.nix:"
+        info '  boot.kernelParams = [ "iommu=pt" ];'
+        info "Then: sudo nixos-rebuild switch && reboot"
+        NEEDS_REBOOT=1
+    elif [ -f /etc/default/grub ]; then
         read -rp "Add iommu=pt to kernel command line? (requires reboot) [Y/n] " iommu_answer
         if [[ ! "$iommu_answer" =~ ^[Nn] ]]; then
             # Add iommu=pt to GRUB_CMDLINE_LINUX_DEFAULT

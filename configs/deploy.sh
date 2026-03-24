@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy PipeWire/WirePlumber/UCM2 configs for Universal Audio Apollo
-# Run on Ubuntu: sudo bash ~/open-apollo/configs/deploy.sh
+# Run on Ubuntu: sudo bash ~/apollo-linux/configs/deploy.sh
 
 set -euo pipefail
 
@@ -17,13 +17,7 @@ else
     echo "No broken config to remove (OK)"
 fi
 
-# Step 2a: Deploy PipeWire Pulse rules (browser quantum fix)
-echo "Installing PipeWire Pulse rules..."
-mkdir -p /etc/pipewire/pipewire-pulse.conf.d
-cp "$SCRIPT_DIR/pipewire/50-apollo-pulse-rules.conf" /etc/pipewire/pipewire-pulse.conf.d/
-echo "  -> /etc/pipewire/pipewire-pulse.conf.d/50-apollo-pulse-rules.conf"
-
-# Step 2b: Deploy WirePlumber rules
+# Step 2: Deploy WirePlumber rules
 echo "Installing WirePlumber rules..."
 mkdir -p /etc/wireplumber/main.lua.d
 cp "$SCRIPT_DIR/wireplumber/51-ua-apollo.lua" /etc/wireplumber/main.lua.d/
@@ -42,58 +36,23 @@ echo "  -> /usr/share/alsa/ucm2/ua_apollo/HiFi.conf"
 ln -sf ../../ua_apollo/ua_apollo.conf /usr/share/alsa/ucm2/conf.d/ua_apollo/ua_apollo.conf
 echo "  -> /usr/share/alsa/ucm2/conf.d/ua_apollo/ua_apollo.conf (symlink)"
 
-# Step 4: Deploy udev rule + profile setup script
-echo "Installing udev rule for auto profile setup..."
-cp "$SCRIPT_DIR/udev/91-ua-apollo.rules" /etc/udev/rules.d/
-cp "$SCRIPT_DIR/udev/open-apollo-profile-setup" /usr/local/bin/
-cp "$SCRIPT_DIR/udev/open-apollo-setup-worker" /usr/local/bin/
-chmod +x /usr/local/bin/open-apollo-profile-setup
-chmod +x /usr/local/bin/open-apollo-setup-worker
-udevadm control --reload-rules 2>/dev/null || true
-echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
-echo "  -> /usr/local/bin/open-apollo-profile-setup"
-echo "  -> /usr/local/bin/open-apollo-setup-worker"
-
-# Step 5: Deploy PipeWire I/O mapping setup script + systemd autostart
+# Step 4: Install PipeWire I/O mapping setup script
 echo "Installing PipeWire I/O setup script..."
-DESKTOP_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cp "$SCRIPT_DIR/pipewire/setup-apollo-io.sh" /usr/local/bin/apollo-setup-io
-chmod +x /usr/local/bin/apollo-setup-io
-echo "  -> /usr/local/bin/apollo-setup-io"
-
-# Install systemd user service for auto-setup after PipeWire starts
-if [ -n "$DESKTOP_USER" ]; then
-    SVC_DIR="$(eval echo ~"$DESKTOP_USER")/.config/systemd/user"
-    mkdir -p "$SVC_DIR"
-    cp "$SCRIPT_DIR/autostart/apollo-setup-io.service" "$SVC_DIR/"
-    # Enable the service (runs as user, not root)
-    sudo -u "$DESKTOP_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$DESKTOP_USER")" \
-        systemctl --user enable apollo-setup-io.service 2>/dev/null || true
-    echo "  -> $SVC_DIR/apollo-setup-io.service (enabled)"
+SETUP_SCRIPT="$SCRIPT_DIR/pipewire/setup-apollo-io.sh"
+if [ -f "$SETUP_SCRIPT" ]; then
+    cp "$SETUP_SCRIPT" /usr/local/bin/apollo-setup-io
+    chmod +x /usr/local/bin/apollo-setup-io
+    echo "  -> /usr/local/bin/apollo-setup-io"
+else
+    echo "  Warning: $SETUP_SCRIPT not found, skipping"
 fi
-
-# Step 6: Deploy tray indicator (autostart + app launcher)
-echo "Installing tray indicator..."
-if [ -n "$DESKTOP_USER" ]; then
-    # Autostart on login
-    AUTOSTART_DIR="$(eval echo ~"$DESKTOP_USER")/.config/autostart"
-    mkdir -p "$AUTOSTART_DIR"
-    sed "s|/opt/open-apollo|$REPO_DIR|g" "$SCRIPT_DIR/autostart/open-apollo-tray.desktop" \
-        > "$AUTOSTART_DIR/open-apollo-tray.desktop"
-    echo "  -> $AUTOSTART_DIR/open-apollo-tray.desktop (autostart)"
-fi
-# App launcher (shows in Activities/Search)
-sed "s|/opt/open-apollo|$REPO_DIR|g" "$SCRIPT_DIR/autostart/open-apollo-tray.desktop" \
-    > /usr/share/applications/open-apollo.desktop
-echo "  -> /usr/share/applications/open-apollo.desktop (app launcher)"
 
 echo ""
 echo "=== Deployment complete ==="
 echo ""
 echo "Next steps:"
 echo "  1. Restart PipeWire:  systemctl --user restart pipewire wireplumber"
-echo "  2. Verify:            wpctl status"
-echo "  3. Test playback:     pw-play /usr/share/sounds/freedesktop/stereo/complete.oga"
-echo ""
-echo "The Apollo will auto-configure as the default audio device when powered on."
+echo "  2. Set up I/O map:    apollo-setup-io"
+echo "  3. Verify:            wpctl status"
+echo "  4. Test playback:     pw-play /usr/share/sounds/freedesktop/stereo/complete.oga"
+echo "  5. Test capture:      pw-record --rate 48000 --channels 2 --format s32 /tmp/test.wav"
