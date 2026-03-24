@@ -704,7 +704,8 @@ struct ua_audio {
 	/* Period elapsed polling timer (replaces unreliable HW timer IRQ) */
 	struct hrtimer period_timer;
 	bool period_timer_running;
-	snd_pcm_uframes_t last_period_pos;
+	snd_pcm_uframes_t last_play_period_pos;
+	snd_pcm_uframes_t last_rec_period_pos;
 };
 
 struct ua_device {

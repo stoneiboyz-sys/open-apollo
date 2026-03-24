@@ -1841,13 +1841,20 @@ static int ua_pcm_open(struct snd_pcm_substream *sub)
 	}
 
 	/*
-	 * Constrain ALSA buffer_size: max = buf_frame_size (HW limit).
-	 * Min = 64 frames to allow smaller period sizes for lower latency.
-	 * The hardware SAMPLE_POS wraps at buf_frame_size; the pointer
-	 * callback does sp % buffer_size so smaller buffers work.
+	 * Fix ALSA buffer_size to the hardware ring size (buf_frame_size,
+	 * typically 8192). The hardware DMA reads from a fixed-size ring
+	 * buffer — the copy callback writes directly into it, and the
+	 * pointer callback reports SAMPLE_POS within it. If ALSA's
+	 * buffer_size is smaller, the copy callback only fills a portion
+	 * of the ring and the hardware plays stale data from the rest.
+	 *
+	 * Period size remains configurable (e.g. 512 for low latency).
+	 * With buffer=8192 and period=512, PipeWire gets 16 periods of
+	 * headroom at the same 10.7ms latency.
 	 */
 	snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
-				     64, audio->buf_frame_size);
+				     audio->buf_frame_size,
+				     audio->buf_frame_size);
 
 	spin_lock_irqsave(&audio->lock, flags);
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
@@ -2226,17 +2233,24 @@ static enum hrtimer_restart ua_period_timer_callback(struct hrtimer *timer)
 	play = audio->play_sub;
 	spin_unlock_irqrestore(&audio->lock, flags);
 
-	/* Check if a period boundary was crossed */
+	/* Check if a period boundary was crossed.
+	 * buffer_size == buf_frame_size (both 8192), so
+	 * sp % buffer_size is the correct position. */
+	if (play) {
+		period_size = play->runtime->period_size;
+		pos = sp % play->runtime->buffer_size;
+		if (pos / period_size != audio->last_play_period_pos / period_size)
+			snd_pcm_period_elapsed(play);
+		audio->last_play_period_pos = pos;
+	}
+
 	if (rec) {
 		period_size = rec->runtime->period_size;
 		pos = sp % rec->runtime->buffer_size;
-		if (pos / period_size != audio->last_period_pos / period_size)
+		if (pos / period_size != audio->last_rec_period_pos / period_size)
 			snd_pcm_period_elapsed(rec);
-		audio->last_period_pos = pos;
+		audio->last_rec_period_pos = pos;
 	}
-
-	if (play)
-		snd_pcm_period_elapsed(play);
 
 	hrtimer_forward_now(timer, ms_to_ktime(1));
 	return HRTIMER_RESTART;
@@ -2253,7 +2267,8 @@ static int ua_pcm_trigger(struct snd_pcm_substream *sub, int cmd)
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
-		audio->last_period_pos = 0;
+		audio->last_play_period_pos = 0;
+		audio->last_rec_period_pos = 0;
 		audio->period_timer_running = true;
 		hrtimer_start(&audio->period_timer,
 			      ms_to_ktime(1), HRTIMER_MODE_REL);
@@ -2289,8 +2304,9 @@ static snd_pcm_uframes_t ua_pcm_pointer(struct snd_pcm_substream *sub)
 	 * Read hardware sample position.
 	 *
 	 * SAMPLE_POS (0x2244) returns the current frame index within
-	 * the circular hardware buffer, wrapping at buf_frame_size.
-	 * ALSA's buffer_size may differ, so wrap to runtime buffer_size.
+	 * the hardware ring buffer. buffer_size is constrained to
+	 * buf_frame_size, so sp % buffer_size == sp % buf_frame_size
+	 * and always produces correct positions.
 	 */
 	sp = ua_read(ua, UA_REG_AX_SAMPLE_POS);
 
