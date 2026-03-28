@@ -1,0 +1,39 @@
+From: Rolando Trevino <rolo@trevino.dev>
+Subject: [PATCH] ALSA: usb-audio: Add fixed-rate quirk for Universal Audio USB devices
+
+Universal Audio Apollo Solo USB, Twin USB, and Twin X USB devices
+use a Cypress FX3 USB controller with a custom FPGA backend. Their
+UAC2 clock source does not implement the GET_RANGE request for
+sample rate enumeration (returns STALL), which prevents
+snd-usb-audio from creating PCM streams.
+
+These devices support 48kHz fixed sample rate. Add them to the
+existing fixed-rate quirk table alongside Line6 and Rode devices
+that have the same limitation.
+
+Tested with Universal Audio Apollo Solo USB (VID 0x2b5a, PID 0x000d)
+on Linux 6.17.0 — device correctly enumerates playback (6ch) and
+capture (10ch) PCM streams after this patch.
+
+Signed-off-by: Rolando Trevino <rolo@trevino.dev>
+---
+ sound/usb/format.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sound/usb/format.c b/sound/usb/format.c
+index XXXXXXX..XXXXXXX 100644
+--- a/sound/usb/format.c
++++ b/sound/usb/format.c
+@@ -435,6 +435,9 @@ static int line6_parse_audio_format_rates_quirk(struct snd_usb_audio *chip,
+ 	case USB_ID(0x0e41, 0x424b): /* Line6 Pod Go */
+ 	case USB_ID(0x19f7, 0x0011): /* Rode Rodecaster Pro */
+ 		return set_fixed_rate(fp, 48000, SNDRV_PCM_RATE_48000);
++	case USB_ID(0x2b5a, 0x000d): /* Universal Audio Apollo Solo USB */
++	case USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */
++	case USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */
++		return set_fixed_rate(fp, 48000, SNDRV_PCM_RATE_48000);
+ 	}
+
+ 	return -ENODEV;
+--
+2.43.0

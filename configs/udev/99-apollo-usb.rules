@@ -1,0 +1,30 @@
+# Universal Audio Apollo USB — firmware loader + DSP init
+# Triggers when FX3 stub appears (pre-firmware) and loads firmware automatically.
+#
+# Supported devices:
+#   Apollo Solo USB  (0x2b5a:0x000c → 0x000d)
+#   Twin USB         (0x2b5a:0x0001 → 0x0002)
+#   Twin X USB       (0x2b5a:0x000e → 0x000f)
+#
+# Requires firmware in /lib/firmware/universal-audio/
+# See docs/usb-apollo-re/ for details.
+
+# FX3 firmware loader stubs — upload firmware on hotplug
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000c", \
+  RUN+="/usr/local/bin/ua-usb-init %k ApolloSolo.bin"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="0001", \
+  RUN+="/usr/local/bin/ua-usb-init %k ApolloTwin.bin"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000e", \
+  RUN+="/usr/local/bin/ua-usb-init %k ApolloTwinX.bin"
+
+# Post-firmware device — run DSP init after enumeration
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000d", \
+  RUN+="/usr/local/bin/ua-usb-dsp-init"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="0002", \
+  RUN+="/usr/local/bin/ua-usb-dsp-init"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000f", \
+  RUN+="/usr/local/bin/ua-usb-dsp-init"
