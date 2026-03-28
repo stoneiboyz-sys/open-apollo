@@ -24,7 +24,7 @@ This applies to all project spaces — issues, pull requests, wiki, and any comm
 
 ## Enforcement
 
-Instances of unacceptable behavior can be reported to **rolotrealanis@gmail.com**. All reports will be reviewed and addressed.
+Instances of unacceptable behavior can be reported to **dev@rolo.work**. All reports will be reviewed and addressed.
 
 ## Attribution
 
