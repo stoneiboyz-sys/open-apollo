@@ -89,7 +89,7 @@ run_sudo() {
 # --- Report state ---
 declare -A STEP_STATUS=()
 declare -A STEP_DETAIL=()
-DISTRO="" DISTRO_ID="" PKG_MGR="" KERNEL="" ARCH="" RAM_MB="" CPU_MODEL=""
+DISTRO="" DISTRO_ID="" PKG_MGR="" KERNEL="" ARCH="" RAM_MB="" CPU_MODEL="" KERNEL_CC=""
 SECURE_BOOT="" IOMMU="" PW_VER="" WP_VER="" PA_RUNNING=""
 EXISTING_CARDS="" SND_MODULES="" TB_CONTROLLER=""
 APOLLO_PCIE="" APOLLO_DEV_TYPE="" APOLLO_DEV_NAME=""
@@ -137,7 +137,7 @@ detect_distro() {
     case "$DISTRO_ID" in
         fedora|rhel|centos) PKG_MGR="dnf" ;;
         ubuntu|debian|pop|linuxmint) PKG_MGR="apt" ;;
-        arch|manjaro|endeavouros) PKG_MGR="pacman" ;;
+        arch|manjaro|endeavouros|cachyos) PKG_MGR="pacman" ;;
         opensuse*|sles) PKG_MGR="zypper" ;;
         nixos) PKG_MGR="nix" ;;
         *)
@@ -145,6 +145,15 @@ detect_distro() {
             warn "Unsupported distro: $DISTRO_ID — dependency install will be manual"
             ;;
     esac
+
+    # Detect if kernel was built with Clang (needed for module compilation)
+    local kbuild="/lib/modules/$KERNEL/build"
+    if [ -f "$kbuild/include/config/CC_IS_CLANG" ]; then
+        KERNEL_CC="clang"
+        info "Kernel built with Clang — will use CC=clang for module build"
+    else
+        KERNEL_CC="gcc"
+    fi
 
     # Audio info
     PW_VER=$(pipewire --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
@@ -218,12 +227,26 @@ check_install_deps() {
         ok "Kernel headers"
     fi
 
-    # gcc
-    if ! command -v gcc &>/dev/null; then
-        missing+=("gcc")
-        missing_pkgs+=("gcc")
+    # Compiler (clang if kernel was built with clang, otherwise gcc)
+    if [ "$KERNEL_CC" = "clang" ]; then
+        if ! command -v clang &>/dev/null; then
+            missing+=("clang")
+            case "$PKG_MGR" in
+                dnf)    missing_pkgs+=("clang") ;;
+                apt)    missing_pkgs+=("clang") ;;
+                pacman) missing_pkgs+=("clang") ;;
+                zypper) missing_pkgs+=("clang") ;;
+            esac
+        else
+            ok "clang (kernel built with Clang)"
+        fi
     else
-        ok "gcc"
+        if ! command -v gcc &>/dev/null; then
+            missing+=("gcc")
+            missing_pkgs+=("gcc")
+        else
+            ok "gcc"
+        fi
     fi
 
     # make
@@ -348,7 +371,12 @@ check_install_deps() {
 build_driver() {
     header "Building Driver"
 
-    local build_output kdir_arg=""
+    local build_output kdir_arg="" cc_arg=""
+
+    # Use clang if kernel was built with clang
+    if [ "$KERNEL_CC" = "clang" ]; then
+        cc_arg="CC=clang"
+    fi
 
     # TEST_BUILD mode: find any installed kernel headers (for Docker containers
     # where the host kernel doesn't match the distro's headers package)
@@ -361,11 +389,15 @@ build_driver() {
             return 0
         fi
         kdir_arg="KDIR=$kdir"
+        # Re-check clang for test build kernel
+        if [ -f "$kdir/../include/config/CC_IS_CLANG" ] || [ -f "$(dirname "$kdir")/include/config/CC_IS_CLANG" ]; then
+            cc_arg="CC=clang"
+        fi
     fi
 
-    make -C "$PROJECT_DIR/driver" $kdir_arg clean &>/dev/null || true
+    make -C "$PROJECT_DIR/driver" $kdir_arg $cc_arg clean &>/dev/null || true
 
-    build_output=$(make -C "$PROJECT_DIR/driver" $kdir_arg 2>&1)
+    build_output=$(make -C "$PROJECT_DIR/driver" $kdir_arg $cc_arg 2>&1)
     local rc=$?
 
     BUILD_WARNINGS=$(echo "$build_output" | grep -c 'warning:' || true)
@@ -426,16 +458,17 @@ setup_dkms() {
     run_sudo cp "$PROJECT_DIR"/driver/*.c "$PROJECT_DIR"/driver/*.h "$dkms_src/" 2>/dev/null || true
     run_sudo cp "$PROJECT_DIR"/driver/Makefile "$dkms_src/"
 
-    # Create dkms.conf
-    run_sudo tee "$dkms_src/dkms.conf" >/dev/null <<DKMSEOF
+    # Create dkms.conf — auto-detect clang-built kernels at DKMS build time
+    run_sudo tee "$dkms_src/dkms.conf" >/dev/null <<'DKMSEOF'
 PACKAGE_NAME="ua_apollo"
-PACKAGE_VERSION="$VERSION"
+PACKAGE_VERSION="__VERSION__"
 BUILT_MODULE_NAME[0]="ua_apollo"
 DEST_MODULE_LOCATION[0]="/updates"
 AUTOINSTALL="yes"
-MAKE[0]="make -C /lib/modules/\${kernelver}/build M=\${dkms_tree}/ua_apollo/\${PACKAGE_VERSION}/build modules"
-CLEAN="make -C /lib/modules/\${kernelver}/build M=\${dkms_tree}/ua_apollo/\${PACKAGE_VERSION}/build clean"
+MAKE[0]="cc_arg=; [ -f /lib/modules/${kernelver}/build/include/config/CC_IS_CLANG ] && cc_arg=CC=clang; make -C /lib/modules/${kernelver}/build M=${dkms_tree}/ua_apollo/${PACKAGE_VERSION}/build $cc_arg modules"
+CLEAN="cc_arg=; [ -f /lib/modules/${kernelver}/build/include/config/CC_IS_CLANG ] && cc_arg=CC=clang; make -C /lib/modules/${kernelver}/build M=${dkms_tree}/ua_apollo/${PACKAGE_VERSION}/build $cc_arg clean"
 DKMSEOF
+    run_sudo sed -i "s/__VERSION__/$VERSION/" "$dkms_src/dkms.conf"
 
     # DKMS add/build/install
     if run_sudo dkms add ua_apollo/$VERSION 2>&1; then

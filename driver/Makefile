@@ -14,8 +14,11 @@ ua_apollo-y := ua_core.o ua_audio.o ua_dsp.o
 # GCC 13.3 ICE workaround: try_forward_edges crash at -O1/-O2
 # Both ua_core.c and ua_audio.c trigger cfgcleanup.cc:580 ICE.
 # Use -Og for development; revisit when functions are split smaller.
+# Clang does not have this bug, so only apply for GCC.
+ifndef CONFIG_CC_IS_CLANG
 CFLAGS_ua_core.o := -Og
 CFLAGS_ua_audio.o := -Og
+endif
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
