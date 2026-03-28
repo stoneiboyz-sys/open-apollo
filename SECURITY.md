@@ -8,7 +8,7 @@ Open Apollo is a kernel module that runs with full system privileges. Security i
 
 **Do not open a public issue for security vulnerabilities.**
 
-Instead, please email **rolotrealanis@gmail.com** with:
+Instead, please email **dev@rolo.work** with:
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
