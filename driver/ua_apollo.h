@@ -29,8 +29,12 @@
 #define PCI_DEVICE_ID_UA_UAD2   0x0001  /* UAD-2 PCIe cards */
 #define PCI_DEVICE_ID_UA_APOLLO 0x0002  /* Apollo Thunderbolt series */
 
-/* Subsystem IDs (select device model within family) */
+/* Subsystem IDs (select device model within family)
+ * From PCI config space — more reliable than serial prefix for device
+ * identification since serial strings can have ambiguous prefixes.
+ */
 #define UA_SUBSYS_APOLLO_X4_QUAD        0x0011
+#define UA_SUBSYS_APOLLO_SOLO           0x000F
 
 /*
  * UAD2DeviceType enum — reconstructed from CPcieDevice::Name() and

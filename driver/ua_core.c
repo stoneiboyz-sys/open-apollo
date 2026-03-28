@@ -205,11 +205,20 @@ static void ua_detect_capabilities(struct ua_device *ua)
 		ua->num_dsps = (ext_caps >> 8) & 0xFF;
 
 		/*
-		 * Device type for v2 needs serial number prefix.
-		 * Read 4 registers at 0x20-0x2C to get 16-byte serial string.
-		 * The first 4 ASCII chars identify the model.
+		 * Device type detection for v2 firmware:
+		 * 1. Try PCI subsystem device ID (reliable, constant per model)
+		 * 2. Fall back to serial number prefix (ambiguous — some serials
+		 *    contain prefixes that match other models, e.g. Solo serial
+		 *    "22522032108702" has "2032" which falsely matches x16D)
 		 */
-		ua_read_serial_type(ua);
+		switch (ua->subsystem_id) {
+		case UA_SUBSYS_APOLLO_SOLO:
+			ua->device_type = UA_DEV_APOLLO_SOLO;
+			break;
+		default:
+			ua_read_serial_type(ua);
+			break;
+		}
 	}
 
 	if (ua->num_dsps > UA_MAX_DSPS)

@@ -142,6 +142,23 @@ The installer is a guided walkthrough that:
 5. Starts the mixer daemon and tray indicator
 6. Plays a test tone so you can verify audio output
 
+### NixOS (Thunderbolt)
+
+Add to your `flake.nix` inputs:
+
+```nix
+inputs.open-apollo.url = "github:rolotrealanis98/open-apollo";
+```
+
+Then in your `configuration.nix`:
+
+```nix
+imports = [ inputs.open-apollo.nixosModules.default ];
+hardware.ua-apollo.enable = true;
+```
+
+Run `nixos-rebuild switch` — the module handles the kernel module build, `iommu=pt`, Thunderbolt (bolt), PipeWire, and required packages.
+
 ### Uninstall
 
 ```bash
