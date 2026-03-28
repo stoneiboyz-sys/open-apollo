@@ -176,33 +176,15 @@ After running `apollo-setup-io`, these devices are available in PipeWire:
 
 ### USB Quick Start (Apollo Solo USB)
 
-USB support is manual — there is no guided installer yet.
-
-**Prerequisites:** Python 3.10+, `pyusb` (`pip install pyusb`), Linux kernel headers
-
-**1. Get firmware** — Download from [UA firmware page](https://help.uaudio.com/hc/en-us/articles/26454031439892)
-or extract from UA Connect on Windows (`C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmware\USB\`).
-Place `ApolloSolo.bin` in `/lib/firmware/universal-audio/`.
-
-**2. Clone and init:**
 ```bash
 git clone https://github.com/rolotrealanis98/open-apollo.git
 cd open-apollo
-sudo python3 tools/usb-full-init.py
+sudo bash scripts/install-usb.sh
 ```
 
-**3. Build the patched snd-usb-audio module** (required — stock kernel module can't enumerate PCM streams):
-```bash
-bash scripts/build-snd-usb.sh    # see docs/usb-apollo-re for manual build notes
-sudo insmod snd-usb-audio.ko
-```
+The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
 
-**4. Setup PipeWire:**
-```bash
-bash configs/pipewire/setup-apollo-solo-usb.sh
-```
-
-After these steps, the following PipeWire devices are available:
+After install, the following PipeWire devices are available:
 
 | Device | Type | Channels |
 |--------|------|----------|
