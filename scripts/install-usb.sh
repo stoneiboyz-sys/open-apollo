@@ -258,7 +258,12 @@ MKEOF
         make 2>&1 | tail -3
     "
 
-    # Check for the .ko file (make may return non-zero from warnings)
+    # Check for the .ko file — retry once if first build failed (race condition)
+    if [ ! -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
+        warn "First build attempt didn't produce .ko, retrying..."
+        su - "$REAL_USER" -c "cd '$SND_USB_BUILD/sound/usb' && make 2>&1 | tail -3"
+    fi
+
     if [ -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
         ok "snd-usb-audio.ko built successfully"
         mkdir -p /lib/modules/"$KERNEL"/updates
