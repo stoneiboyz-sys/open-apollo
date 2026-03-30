@@ -212,6 +212,9 @@ static void ua_detect_capabilities(struct ua_device *ua)
 		 *    "22522032108702" has "2032" which falsely matches x16D)
 		 */
 		switch (ua->subsystem_id) {
+		case UA_SUBSYS_APOLLO_8P:
+			ua->device_type = UA_DEV_APOLLO_8P;
+			break;
 		case UA_SUBSYS_APOLLO_SOLO:
 			ua->device_type = UA_DEV_APOLLO_SOLO;
 			break;
@@ -289,6 +292,7 @@ static void ua_read_serial_type(struct ua_device *ua)
 const char *ua_device_name(u32 device_type)
 {
 	switch (device_type) {
+	case UA_DEV_APOLLO_8P:		return "Apollo 8P";
 	case UA_DEV_APOLLO_X4:		return "Apollo x4";
 	case UA_DEV_APOLLO_X6:		return "Apollo x6";
 	case UA_DEV_APOLLO_X8:		return "Apollo x8";

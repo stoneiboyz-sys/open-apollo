@@ -35,6 +35,7 @@
  */
 #define UA_SUBSYS_APOLLO_X4_QUAD        0x0011
 #define UA_SUBSYS_APOLLO_SOLO           0x000F
+#define UA_SUBSYS_APOLLO_8P             0x0006
 
 /*
  * UAD2DeviceType enum — reconstructed from CPcieDevice::Name() and
@@ -46,6 +47,9 @@
  *
  * DSP variant (SOLO/DUO/QUAD/HEXA/OCTO) comes from ext_caps bits[15:8].
  */
+
+/* Original (pre-x) Thunderbolt device types (from ext_caps register) */
+#define UA_DEV_APOLLO_8P            0x0A  /* Subsys 0x0006, serial 1526xxxx */
 
 /* v2 Thunderbolt device types (from serial prefix table) */
 #define UA_DEV_APOLLO_X6            0x1E  /* Serial 2016 */
