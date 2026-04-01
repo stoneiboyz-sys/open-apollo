@@ -13,6 +13,7 @@ After running, reload snd-usb-audio:
 import os
 import struct
 import sys
+import time
 
 import usb.core
 import usb.util
@@ -32,16 +33,34 @@ def replay_init_sequence(dev, bin_path):
         for i in range(count):
             pkt_len = struct.unpack("<I", f.read(4))[0]
             pkt_data = f.read(pkt_len)
-            dev.write(EP_BULK_OUT, pkt_data, timeout=2000)
 
             wc, cmd_type, magic = struct.unpack_from("<HBB", pkt_data, 0)
+
+            # Large packets (DSP program loads) and early FPGA config need more time
+            if pkt_len > 512 or i < 6:
+                timeout = 10000
+            else:
+                timeout = 5000
+
+            for attempt in range(3):
+                try:
+                    dev.write(EP_BULK_OUT, pkt_data, timeout=timeout)
+                    break
+                except usb.core.USBTimeoutError:
+                    if attempt < 2:
+                        print(f"  [{i:2d}] timeout, retrying ({attempt+1}/3)...")
+                        time.sleep(0.5)
+                    else:
+                        raise
+
             if i < 5 or i == count - 1:
                 print(f"  [{i:2d}] type={cmd_type:3d} words={wc:3d} len={pkt_len}")
 
-            # Drain responses
+            # Drain responses — wait longer after big packets
+            drain_timeout = 500 if pkt_len > 512 else 100
             try:
                 while True:
-                    dev.read(EP_BULK_IN, 1024, timeout=100)
+                    dev.read(EP_BULK_IN, 1024, timeout=drain_timeout)
             except usb.core.USBTimeoutError:
                 pass
 

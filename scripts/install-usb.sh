@@ -67,7 +67,7 @@ fi
 case "$DISTRO_ID" in
     fedora|rhel|centos) PKG_MGR="dnf" ;;
     ubuntu|debian|pop|linuxmint) PKG_MGR="apt" ;;
-    arch|manjaro|endeavouros) PKG_MGR="pacman" ;;
+    arch|manjaro|endeavouros|cachyos) PKG_MGR="pacman" ;;
     opensuse*|sles) PKG_MGR="zypper" ;;
 esac
 
@@ -135,8 +135,13 @@ else
                 kernel-devel gcc make wget 2>/dev/null
             ;;
         pacman)
+            # CachyOS uses linux-cachyos-headers; detect installed kernel package
+            KERN_HDR_PKG="linux-headers"
+            if pacman -Q linux-cachyos &>/dev/null; then
+                KERN_HDR_PKG="linux-cachyos-headers"
+            fi
             run_sudo pacman -S --noconfirm python python-pip \
-                linux-headers gcc make wget 2>/dev/null
+                "$KERN_HDR_PKG" gcc make wget 2>/dev/null
             ;;
     esac
 
@@ -213,12 +218,12 @@ info "UA USB devices need a 3-line kernel patch for sample rate enumeration."
 info "Building out-of-tree snd-usb-audio module..."
 
 rm -rf "$SND_USB_BUILD"
-su - "$REAL_USER" -c "mkdir -p '$SND_USB_BUILD'"
+su - "$REAL_USER" -s /bin/bash -c "mkdir -p '$SND_USB_BUILD'"
 
 # Download kernel source (just sound/usb) as the real user
 KVER_MAJOR=$(echo "$KERNEL" | grep -oP '^\d+\.\d+')
 info "Downloading sound/usb source for kernel $KVER_MAJOR..."
-su - "$REAL_USER" -c "cd '$SND_USB_BUILD' && wget -q 'https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR%%.*}.x/linux-${KVER_MAJOR}.tar.xz' -O - | xz -d | tar x --strip-components=1 'linux-${KVER_MAJOR}/sound/usb/' 2>/dev/null"
+su - "$REAL_USER" -s /bin/bash -c "cd '$SND_USB_BUILD' && wget -q 'https://cdn.kernel.org/pub/linux/kernel/v${KVER_MAJOR%%.*}.x/linux-${KVER_MAJOR}.tar.xz' -O - | xz -d | tar x --strip-components=1 'linux-${KVER_MAJOR}/sound/usb/' 2>/dev/null"
 
 if [ ! -f "$SND_USB_BUILD/sound/usb/format.c" ]; then
     fail "Could not download kernel source for $KVER_MAJOR"
@@ -226,7 +231,7 @@ if [ ! -f "$SND_USB_BUILD/sound/usb/format.c" ]; then
     info "See: tools/usb-re/0001-ALSA-usb-audio-Add-quirk-for-Universal-Audio-USB-devices.patch"
 else
     # Apply patch and build as real user
-    su - "$REAL_USER" -c "
+    su - "$REAL_USER" -s /bin/bash -c "
         cd '$SND_USB_BUILD/sound/usb'
 
         # Apply the fixed-rate quirk patch
@@ -261,7 +266,7 @@ MKEOF
     # Check for the .ko file — retry once if first build failed (race condition)
     if [ ! -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
         warn "First build attempt didn't produce .ko, retrying..."
-        su - "$REAL_USER" -c "cd '$SND_USB_BUILD/sound/usb' && make 2>&1 | tail -3"
+        su - "$REAL_USER" -s /bin/bash -c "cd '$SND_USB_BUILD/sound/usb' && make 2>&1 | tail -3"
     fi
 
     if [ -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
