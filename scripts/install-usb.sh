@@ -267,19 +267,31 @@ else
 \tcase USB_ID(0x2b5a, 0x0002): /* Universal Audio Twin USB */\
 \tcase USB_ID(0x2b5a, 0x000f): /* Universal Audio Twin X USB */' "$SRC/format.c"
 
-    # Skip implicit feedback for UA USB devices (EP 0x83 descriptor conflict)
+    # Patch 2: Skip implicit feedback for UA USB devices (EP 0x83 conflict)
     # The device declares EP 0x83 as "Implicit feedback Data" but handles its
     # own clock — snd-usb-audio trying to use it as feedback kills playback.
+    # Two patches: implicit.c table entry + endpoint.c compatibility bypass.
     python3 -c "
+import re
+
+# --- implicit.c: add SKIP_DEV entries to playback quirk table ---
 with open('$SRC/implicit.c') as f: s = f.read()
-s = s.replace(
-    '\t{ } /* terminator */\n};',
+s = re.sub(
+    r'(\t\{ \}\s*/\*\s*terminator\s*\*/)',
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000d), /* Universal Audio Apollo Solo USB */\n'
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x0002), /* Universal Audio Twin USB */\n'
     '\tIMPLICIT_FB_SKIP_DEV(0x2b5a, 0x000f), /* Universal Audio Twin X USB */\n'
-    '\t{ } /* terminator */\n};',
-    1)
+    r'\1',
+    s, count=1)
 with open('$SRC/implicit.c', 'w') as f: f.write(s)
+
+# --- endpoint.c: allow EP reuse for UA devices (skip compat check) ---
+with open('$SRC/endpoint.c') as f: s = f.read()
+s = re.sub(
+    r'if \(!endpoint_compatible\(ep,\s*fp,\s*params\)\)',
+    'if (!endpoint_compatible(ep, fp, params) &&\n\t\t    USB_ID_VENDOR(chip->usb_id) != 0x2b5a)',
+    s, count=1)
+with open('$SRC/endpoint.c', 'w') as f: f.write(s)
 "
 
     # Fix includes for out-of-tree build
