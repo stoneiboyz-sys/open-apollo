@@ -222,32 +222,14 @@ def main():
     print("Ready")
 
     if daemon_mode:
-        # Daemon mode: keep running to drain EP6 + re-send routing after
-        # PipeWire opens streams. When snd-usb-audio sends SET_INTERFACE to
-        # activate capture, the FPGA routing table gets wiped. We wait for
-        # the ALSA card to appear, then re-send routing after a delay to
-        # catch PipeWire's stream open.
+        # Daemon mode: keep running to drain EP6 continuously.
+        # DSP init already ran above — no periodic re-sends needed.
+        # The daemon must start AFTER snd-usb-audio loads (SET_INTERFACE
+        # wipes FPGA routing, so DSP init must come after probe).
         print("EP6 drain active (Ctrl+C to stop)")
         try:
-            # Re-send routing table every 2 seconds.
-            # Each time PipeWire opens a stream, snd-usb-audio sends
-            # SET_INTERFACE which wipes the FPGA routing. Since the
-            # routing write is idempotent, periodic re-send is safe
-            # and guarantees routing survives any stream open/close.
-            resend_count = 0
             while True:
-                time.sleep(2)
-                try:
-                    dsp_init(dev)
-                    set_clock(dev, 48000, seq=0x10)
-                    set_monitor_level(dev, -12)
-                    resend_count += 1
-                    if resend_count <= 3 or resend_count % 30 == 0:
-                        print("Routing re-sent (#{})"
-                              .format(resend_count), flush=True)
-                except usb.core.USBError as e:
-                    print("Routing re-send FAILED: {}".format(e),
-                          flush=True)
+                time.sleep(1)
         except KeyboardInterrupt:
             pass
         finally:

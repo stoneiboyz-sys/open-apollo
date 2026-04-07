@@ -379,21 +379,36 @@ if [ -n "$USB_SPEED" ]; then
     fi
 fi
 
-# Correct ordering: unload module → kill old daemon → start daemon → load module
-# The EP6 drain daemon must claim Interface 0 BEFORE snd-usb-audio probes,
-# otherwise the module grabs the interface and the daemon can't start.
+# Correct ordering: unload module → kill daemon → load module → start daemon
+#
+# DSP init MUST run AFTER snd-usb-audio loads. The module probe sends
+# SET_INTERFACE which reconfigures the FPGA — any DSP init done before
+# probe gets wiped. EP6 flooding only starts after FPGA_ACTIVATE (which
+# is in the DSP init), so loading the module first is safe.
 
-# Step A: Unload snd-usb-audio and kill any existing daemon
+# Step A: Clean slate
+run_sudo pkill -9 -f "usb-dsp-init.py" 2>/dev/null || true
 if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
-    info "Unloading snd-usb-audio for clean reinit..."
     run_sudo rmmod snd_usb_audio 2>/dev/null || true
 fi
-run_sudo pkill -f "usb-dsp-init.py --daemon" 2>/dev/null || true
 sleep 1
 
-# Step B: Start DSP init + EP6 drain daemon
-# On Intel xHCI controllers, EP6 notifications flood the USB stack if not consumed.
-# The --daemon flag keeps the script running to drain EP6 in the background.
+# Step B: Load patched snd-usb-audio first (probes device, sends SET_INTERFACE)
+if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
+    info "Loading patched snd-usb-audio..."
+    run_sudo modprobe snd_usb_audio
+    sleep 2
+    if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
+        ok "ALSA card detected: $(grep -i Apollo /proc/asound/cards | head -1 | xargs)"
+    else
+        warn "Apollo not in ALSA cards — check USB speed and firmware"
+    fi
+fi
+
+# Step C: Start DSP init + EP6 drain daemon AFTER module is loaded
+# DSP init must come after SET_INTERFACE (sent during module probe),
+# otherwise the FPGA routing gets wiped. EP6 only floods after
+# FPGA_ACTIVATE, so starting the daemon after modprobe is safe.
 if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
     info "Initializing DSP (FPGA activation + EP6 drain + monitor routing)..."
     run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" --daemon </dev/null >/dev/null 2>&1 &
@@ -404,18 +419,6 @@ if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
     else
         warn "DSP init may have failed — check USB connection"
         info "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
-    fi
-fi
-
-# Step C: Load patched snd-usb-audio (probes interfaces 1-3, daemon holds interface 0)
-if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
-    info "Loading patched snd-usb-audio..."
-    run_sudo modprobe snd_usb_audio
-    sleep 2
-    if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
-        ok "ALSA card detected: $(grep -i Apollo /proc/asound/cards | head -1 | xargs)"
-    else
-        warn "Apollo not in ALSA cards — check USB speed and firmware"
     fi
 fi
 
