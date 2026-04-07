@@ -183,13 +183,13 @@ def main():
 
     print("Found: {}".format(name))
 
-    # Detach kernel drivers from DSP + audio control interfaces
-    for intf in [0, 1]:
-        try:
-            if dev.is_kernel_driver_active(intf):
-                dev.detach_kernel_driver(intf)
-        except Exception:
-            pass
+    # Detach kernel driver from Interface 0 (vendor DSP) only.
+    # Do NOT touch interfaces 1-3 (audio) — snd-usb-audio needs them.
+    try:
+        if dev.is_kernel_driver_active(0):
+            dev.detach_kernel_driver(0)
+    except Exception:
+        pass
 
     usb.util.claim_interface(dev, 0)
 
