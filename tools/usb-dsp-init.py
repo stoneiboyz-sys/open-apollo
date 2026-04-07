@@ -222,10 +222,32 @@ def main():
     print("Ready")
 
     if daemon_mode:
-        # Daemon mode: keep running to drain EP6 continuously
-        # Interface 0 stays claimed — snd-usb-audio only needs interfaces 1-3
+        # Daemon mode: keep running to drain EP6 + re-send routing after
+        # PipeWire opens streams. When snd-usb-audio sends SET_INTERFACE to
+        # activate capture, the FPGA routing table gets wiped. We wait for
+        # the ALSA card to appear, then re-send routing after a delay to
+        # catch PipeWire's stream open.
         print("EP6 drain active (Ctrl+C to stop)")
         try:
+            # Wait for ALSA card to appear (snd-usb-audio probe)
+            for _ in range(30):
+                try:
+                    with open("/proc/asound/cards") as f:
+                        if "Apollo" in f.read():
+                            print("ALSA card detected — waiting for PipeWire...")
+                            break
+                except OSError:
+                    pass
+                time.sleep(1)
+
+            # Wait for PipeWire to open streams, then re-send routing
+            time.sleep(5)
+            dsp_init(dev)
+            set_clock(dev, 48000, seq=0x10)
+            set_monitor_level(dev, -12)
+            print("Routing re-sent after stream open")
+
+            # Keep draining EP6
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
