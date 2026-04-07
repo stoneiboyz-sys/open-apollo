@@ -315,12 +315,13 @@ all:
 MKEOF
     chown -R "$REAL_USER":"$REAL_USER" "$SND_USB_BUILD"
 
-    su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | tail -5"
+    su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | grep -v 'BTF\|vmlinux' | tail -5"
 
     # Check for the .ko file — retry once if first build failed
+    # (BTF warnings are cosmetic and don't affect the module)
     if [ ! -f "$SRC/snd-usb-audio.ko" ]; then
         warn "First build attempt didn't produce .ko, retrying..."
-        su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | tail -5"
+        su - "$REAL_USER" -s /bin/bash -c "cd '$SRC' && make $BUILD_ARGS 2>&1 | grep -v 'BTF\|vmlinux' | tail -5"
     fi
 
     if [ -f "$SND_USB_BUILD/sound/usb/snd-usb-audio.ko" ]; then
@@ -378,12 +379,23 @@ if [ -n "$USB_SPEED" ]; then
     fi
 fi
 
-# Run DSP init + EP6 drain daemon (activate FPGA + drain interrupt endpoint)
+# Correct ordering: unload module → kill old daemon → start daemon → load module
+# The EP6 drain daemon must claim Interface 0 BEFORE snd-usb-audio probes,
+# otherwise the module grabs the interface and the daemon can't start.
+
+# Step A: Unload snd-usb-audio and kill any existing daemon
+if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
+    info "Unloading snd-usb-audio for clean reinit..."
+    run_sudo rmmod snd_usb_audio 2>/dev/null || true
+fi
+run_sudo pkill -f "usb-dsp-init.py --daemon" 2>/dev/null || true
+sleep 1
+
+# Step B: Start DSP init + EP6 drain daemon
 # On Intel xHCI controllers, EP6 notifications flood the USB stack if not consumed.
 # The --daemon flag keeps the script running to drain EP6 in the background.
 if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
     info "Initializing DSP (FPGA activation + EP6 drain + monitor routing)..."
-    run_sudo pkill -f "usb-dsp-init.py --daemon" 2>/dev/null || true
     run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" --daemon </dev/null >/dev/null 2>&1 &
     DSP_PID=$!
     sleep 3
@@ -395,11 +407,9 @@ if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
     fi
 fi
 
-# Load patched snd-usb-audio module
+# Step C: Load patched snd-usb-audio (probes interfaces 1-3, daemon holds interface 0)
 if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
     info "Loading patched snd-usb-audio..."
-    run_sudo rmmod snd_usb_audio 2>/dev/null || true
-    sleep 1
     run_sudo modprobe snd_usb_audio
     sleep 2
     if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
