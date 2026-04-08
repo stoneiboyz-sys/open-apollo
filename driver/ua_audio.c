@@ -590,6 +590,17 @@ int ua_aceface_handshake(struct ua_device *ua)
 	int retry, poll;
 	u32 status;
 
+	/*
+	 * Quick ACEFACE probe: 2 retries x 10 polls x 50ms = ~1s max.
+	 *
+	 * The full 20s timeout (UA_CONNECT_RETRIES) blocks the PCI probe
+	 * path and freezes the system on warm reboot when the Apollo
+	 * firmware doesn't respond.  If it doesn't connect quickly here,
+	 * set aceface_failed and let hot-replug (power cycle) handle it.
+	 */
+#define EARLY_ACEFACE_RETRIES   2
+#define EARLY_ACEFACE_POLL_MS   50
+
 	if (ua->aceface_done)
 		return 0;
 
@@ -598,7 +609,7 @@ int ua_aceface_handshake(struct ua_device *ua)
 		 UA_AX_CONNECT_MAGIC, UA_REG_NOTIF_ACEFACE,
 		 UA_REG_NOTIF_STATUS);
 
-	for (retry = 0; retry < UA_CONNECT_RETRIES; retry++) {
+	for (retry = 0; retry < EARLY_ACEFACE_RETRIES; retry++) {
 		ua_write(ua, UA_REG_NOTIF_ACEFACE, UA_AX_CONNECT_MAGIC);
 		ua_write(ua, UA_REG_AX_CONNECT, UA_AX_CONNECT);
 
@@ -626,13 +637,12 @@ int ua_aceface_handshake(struct ua_device *ua)
 				ua_pcie_setup(ua);
 				return 0;
 			}
-			msleep(UA_CONNECT_POLL_MS);
+			msleep(EARLY_ACEFACE_POLL_MS);
 		}
 	}
 
 	dev_warn(&ua->pdev->dev,
-		 "early ACEFACE timed out after %d retries\n",
-		 UA_CONNECT_RETRIES);
+		 "early ACEFACE timed out — power-cycle Apollo to connect\n");
 	ua->aceface_failed = true;
 	return -ETIMEDOUT;
 }
