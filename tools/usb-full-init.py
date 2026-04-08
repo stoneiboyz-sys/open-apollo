@@ -22,7 +22,11 @@ UA_VID = 0x2B5A
 SOLO_PID = 0x000D
 EP_BULK_OUT = 0x01
 EP_BULK_IN = 0x81
-INIT_BIN = os.path.join(os.path.dirname(__file__), "usb-re", "init-bulk-sequence.bin")
+# Look for init sequence in both repo layout and installed layout
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+INIT_BIN = os.path.join(_script_dir, "usb-re", "init-bulk-sequence.bin")
+if not os.path.exists(INIT_BIN):
+    INIT_BIN = os.path.join(_script_dir, "init-bulk-sequence.bin")
 
 
 def replay_init_sequence(dev, bin_path):
@@ -107,12 +111,12 @@ if not os.path.exists(INIT_BIN):
     print(f"Missing: {INIT_BIN}")
     sys.exit(1)
 
-for intf in [0, 1]:
-    try:
-        if dev.is_kernel_driver_active(intf):
-            dev.detach_kernel_driver(intf)
-    except Exception:
-        pass
+# Only detach Interface 0 (vendor DSP). Leave audio interfaces for snd-usb-audio.
+try:
+    if dev.is_kernel_driver_active(0):
+        dev.detach_kernel_driver(0)
+except Exception:
+    pass
 usb.util.claim_interface(dev, 0)
 
 # Step 1: Full init sequence (FPGA + routing + DSP programs)
@@ -125,13 +129,16 @@ data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
 freq = struct.unpack("<I", bytes(data))[0]
 print(f"Clock: {freq} Hz")
 
+usb.util.release_interface(dev, 0)
+
 # Step 3: Set monitor level to -12dB via vendor ctrl (no interface claim needed)
+# Use high sequence counter (100) so FPGA processes it — the full init
+# leaves the internal counter at ~38, so seq=7 gets ignored.
 raw = int(192 + (-12) * 2)  # 0xa8
 mask_buf = bytearray(128)
 struct.pack_into("<I", mask_buf, 16, (0x00FF << 16) | raw)
 dev.ctrl_transfer(0x41, 0x03, 0x062D, 0, bytes(mask_buf), timeout=1000)
-dev.ctrl_transfer(0x41, 0x03, 0x0602, 0, struct.pack("<I", 7), timeout=1000)
+dev.ctrl_transfer(0x41, 0x03, 0x0602, 0, struct.pack("<I", 100), timeout=1000)
 print("Monitor: -12 dB")
 
-usb.util.release_interface(dev, 0)
-print("Ready — reload snd-usb-audio to get audio back")
+print("Ready — run 'sudo modprobe snd_usb_audio' to get ALSA card")
