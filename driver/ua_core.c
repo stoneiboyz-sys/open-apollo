@@ -30,7 +30,6 @@
 #include <linux/idr.h>
 #include <linux/version.h>
 #include <linux/delay.h>
-#include <linux/pm_runtime.h>
 
 #include <sound/control.h>
 
@@ -2558,15 +2557,6 @@ static int ua_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_master(pdev);
 
 	/*
-	 * Prevent Thunderbolt link from going to D3cold between probe
-	 * and first audio use.  On some kernels (6.18+), the PCIe PM
-	 * subsystem suspends the device shortly after probe, which
-	 * tears down the Thunderbolt link and leaves BAR0 unreachable.
-	 */
-	pci_d3cold_disable(pdev);
-	pm_runtime_get_noresume(&pdev->dev);
-
-	/*
 	 * Force 32-bit DMA mask.
 	 *
 	 * Although the SG registers have hi/lo pairs (64-bit capable),
@@ -2761,10 +2751,6 @@ static void ua_remove(struct pci_dev *pdev)
 	bool dead = !pci_device_is_present(pdev);
 
 	dev_info(&pdev->dev, "ua_remove: surprise=%d\n", dead);
-
-	/* Release runtime PM ref taken in probe */
-	pm_runtime_put_noidle(&pdev->dev);
-	pci_d3cold_enable(pdev);
 
 	/*
 	 * 1. Set shutdown flag — blocks new BAR0 access via ua_read/ua_write
