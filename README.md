@@ -68,7 +68,7 @@ USB support uses `sudo bash scripts/install-usb.sh`. See [USB Quick Start](#usb-
 | **Ardour JACK routing** — Ardour via JACK can steal ALSA device from PipeWire | Moderate | Launch with `pw-jack ardour7`; restart PipeWire if audio stops |
 | **Audacity ALSA-only** — Ubuntu's Audacity package lacks PipeWire backend | Minor | Install Audacity via Flatpak for PipeWire support |
 | **GNOME Sound Settings** — input level meter may not show activity | Cosmetic | Audio works; meter is a GNOME UI limitation with pro-audio devices |
-| **Thunderbolt link instability** — fresh boot with Apollo on may need power cycle | Moderate | Install script guides through power cycle; `apollo-setup-io` recovers |
+| **Warm reboot requires Apollo power cycle** — rebooting Linux while Apollo stays powered leaves firmware in a stale state; audio won't work until Apollo is power-cycled | Moderate | After reboot: turn Apollo off, wait 5s, turn back on. Hot-replug auto-recovers within ~7s. Cold boot (Apollo powered on after Linux) works without issues. |
 
 ## App Compatibility
 
