@@ -203,7 +203,7 @@ fi
 
 # Restart PipeWire to clean up any remaining Apollo nodes
 if [ -n "$DESKTOP_USER" ] && [ -n "$USER_UID" ]; then
-    pw_run systemctl --user restart pipewire.service wireplumber.service 2>/dev/null || true
+    pw_run systemctl --user restart pipewire.service pipewire-pulse.socket pipewire-pulse.service wireplumber.service 2>/dev/null || true
 fi
 
 echo ""

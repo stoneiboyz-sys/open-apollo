@@ -711,7 +711,7 @@ run_init() {
         # Restart PipeWire so newly-deployed WirePlumber rules take effect
         info "Restarting PipeWire to load new configs..."
         sudo -u "$pw_user" XDG_RUNTIME_DIR="/run/user/$pw_uid" \
-            systemctl --user restart pipewire wireplumber 2>/dev/null || true
+            systemctl --user restart pipewire pipewire-pulse.socket pipewire-pulse.service wireplumber 2>/dev/null || true
         sleep 3
 
         info "Setting up PipeWire audio devices..."
