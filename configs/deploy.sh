@@ -78,6 +78,27 @@ else
     echo "  Warning: $SETUP_SCRIPT not found, skipping"
 fi
 
+# Step 5: Deploy udev rule and hotplug helper scripts
+echo "Installing udev rule and hotplug scripts..."
+UDEV_DIR="$SCRIPT_DIR/udev"
+if [ -f "$UDEV_DIR/91-ua-apollo.rules" ]; then
+    cp "$UDEV_DIR/91-ua-apollo.rules" /etc/udev/rules.d/
+    echo "  -> /etc/udev/rules.d/91-ua-apollo.rules"
+
+    cp "$UDEV_DIR/open-apollo-profile-setup" /usr/local/bin/
+    chmod +x /usr/local/bin/open-apollo-profile-setup
+    echo "  -> /usr/local/bin/open-apollo-profile-setup"
+
+    cp "$UDEV_DIR/open-apollo-setup-worker" /usr/local/bin/
+    chmod +x /usr/local/bin/open-apollo-setup-worker
+    echo "  -> /usr/local/bin/open-apollo-setup-worker"
+
+    udevadm control --reload-rules 2>/dev/null || true
+    echo "  udev rules reloaded"
+else
+    echo "  Warning: udev rules not found, skipping"
+fi
+
 echo ""
 echo "=== Deployment complete ==="
 echo ""
