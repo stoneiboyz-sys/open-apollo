@@ -1574,6 +1574,8 @@ static int ua_audio_start_transport(struct ua_device *ua)
 	if (readback == 0xFFFFFFFF) {
 		dev_err(&ua->pdev->dev,
 			"device unreachable after transport start!\n");
+		audio->connected = false;
+		audio->transport_running = false;
 		return -ENODEV;
 	}
 
@@ -2053,6 +2055,13 @@ static int __attribute__((optimize("O1"))) ua_pcm_prepare(struct snd_pcm_substre
 
 	if (atomic_read(&ua->shutdown))
 		return -ENODEV;
+
+	/* Verify device is reachable before attempting any hardware access */
+	if (ua_read(ua, UA_REG_FPGA_REV) == 0xFFFFFFFF) {
+		dev_err(&ua->pdev->dev,
+			"pcm_prepare: device unreachable\n");
+		return -ENODEV;
+	}
 
 	dev_info(&ua->pdev->dev,
 		 "pcm_prepare: stream=%s rate=%u channels=%u period=%lu buffer=%lu "
