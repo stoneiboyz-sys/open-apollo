@@ -54,12 +54,12 @@ run_sudo() {
 }
 
 # Detect if kernel was built with Clang (CachyOS, some Arch kernels)
+# Use /proc/version as ground truth — it reports the actual compiler the
+# running kernel was built with. .config and Makefile can have stale or
+# misleading clang references even on gcc-built kernels.
 KERN_CC="gcc"
-if [ -f "/lib/modules/$(uname -r)/build/Makefile" ]; then
-    if grep -q 'clang' "/lib/modules/$(uname -r)/build/Makefile" 2>/dev/null || \
-       grep -q 'CC.*clang' "/lib/modules/$(uname -r)/build/.config" 2>/dev/null; then
-        KERN_CC="clang"
-    fi
+if grep -q "clang version" /proc/version 2>/dev/null; then
+    KERN_CC="clang"
 fi
 
 # ================================================================
@@ -293,6 +293,21 @@ s = re.sub(
     'if (!endpoint_compatible(ep, fp, params) &&\n\t\t    USB_ID_VENDOR(chip->usb_id) != 0x2b5a)',
     s, count=1)
 with open('$SRC/endpoint.c', 'w') as f: f.write(s)
+
+# --- quirks.c: add IFACE_SKIP_CLOSE for UA devices ---
+# PipeWire opens/closes capture streams during negotiation. Each close
+# resets Interface 3 to alt=0, wiping the FPGA capture routing that
+# usb-full-init.py programmed. IFACE_SKIP_CLOSE prevents the alt=0
+# reset so the DSP program state persists across stream open/close.
+with open('$SRC/quirks.c') as f: s = f.read()
+s = re.sub(
+    r'([ \t]*\{[ ]?\}[ \t]*/\*\s*terminator\s*\*/)',
+    '\t{ USB_DEVICE(0x2b5a, 0x000d), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Apollo Solo USB */\n'
+    '\t{ USB_DEVICE(0x2b5a, 0x0002), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Twin USB */\n'
+    '\t{ USB_DEVICE(0x2b5a, 0x000f), .driver_info = QUIRK_FLAG_IFACE_SKIP_CLOSE }, /* Twin X USB */\n'
+    r'\1',
+    s, count=1)
+with open('$SRC/quirks.c', 'w') as f: f.write(s)
 "
 
     # Fix includes for out-of-tree build
@@ -380,21 +395,31 @@ if [ -n "$USB_SPEED" ]; then
     fi
 fi
 
-# Correct ordering: unload module → kill daemon → load module → start daemon
-#
-# DSP init MUST run AFTER snd-usb-audio loads. The module probe sends
-# SET_INTERFACE which reconfigures the FPGA — any DSP init done before
-# probe gets wiped. EP6 flooding only starts after FPGA_ACTIVATE (which
-# is in the DSP init), so loading the module first is safe.
+# Ordering: full DSP init first (one-shot), then load module.
+# The DSP program persists in FPGA memory across SET_INTERFACE, so
+# loading the module after init is safe — capture and playback both work.
+# No daemon needed.
 
 # Step A: Clean slate
-run_sudo pkill -9 -f "usb-dsp-init.py" 2>/dev/null || true
+run_sudo pkill -9 -f "usb-dsp-init\|usb-full-init" 2>/dev/null || true
 if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
     run_sudo rmmod snd_usb_audio 2>/dev/null || true
 fi
 sleep 1
 
-# Step B: Load patched snd-usb-audio first (probes device, sends SET_INTERFACE)
+# Step B: Run full DSP init (38 packets including DSP program load for capture)
+if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
+    info "Running full DSP init (FPGA + routing + DSP program + monitor)..."
+    if run_sudo python3 "$PROJECT_DIR/tools/usb-full-init.py" 2>&1 | tail -5; then
+        ok "DSP initialized"
+    else
+        warn "Full DSP init failed — trying lightweight init..."
+        run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" 2>&1 | tail -5 || true
+    fi
+    sleep 1
+fi
+
+# Step C: Load patched snd-usb-audio (probes device, sends SET_INTERFACE)
 if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
     info "Loading patched snd-usb-audio..."
     run_sudo modprobe snd_usb_audio
@@ -403,23 +428,6 @@ if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
         ok "ALSA card detected: $(grep -i Apollo /proc/asound/cards | head -1 | xargs)"
     else
         warn "Apollo not in ALSA cards — check USB speed and firmware"
-    fi
-fi
-
-# Step C: Start DSP init + EP6 drain daemon AFTER module is loaded
-# DSP init must come after SET_INTERFACE (sent during module probe),
-# otherwise the FPGA routing gets wiped. EP6 only floods after
-# FPGA_ACTIVATE, so starting the daemon after modprobe is safe.
-if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
-    info "Initializing DSP (FPGA activation + EP6 drain + monitor routing)..."
-    run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" --daemon </dev/null >/dev/null 2>&1 &
-    DSP_PID=$!
-    sleep 3
-    if kill -0 "$DSP_PID" 2>/dev/null; then
-        ok "DSP initialized + EP6 drain active (PID $DSP_PID)"
-    else
-        warn "DSP init may have failed — check USB connection"
-        info "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
     fi
 fi
 
@@ -435,7 +443,9 @@ UDEV_DIR="/etc/udev/rules.d"
 info "Installing firmware loader and DSP init scripts..."
 run_sudo mkdir -p "$UA_USB_LIB"
 run_sudo cp "$PROJECT_DIR/tools/fx3-load.py" "$UA_USB_LIB/"
+run_sudo cp "$PROJECT_DIR/tools/usb-full-init.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-dsp-init.py" "$UA_USB_LIB/"
+run_sudo cp "$PROJECT_DIR/tools/usb-re/init-bulk-sequence.bin" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-init.sh" "$UA_USB_BIN/ua-usb-init"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-dsp-init.sh" "$UA_USB_BIN/ua-usb-dsp-init"
 run_sudo chmod +x "$UA_USB_BIN/ua-usb-init" "$UA_USB_BIN/ua-usb-dsp-init"
