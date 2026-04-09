@@ -54,13 +54,12 @@ run_sudo() {
 }
 
 # Detect if kernel was built with Clang (CachyOS, some Arch kernels)
-# Only check CC_IS_CLANG in .config — grepping Makefile for "clang" causes
-# false positives on Ubuntu/Debian where Makefile mentions clang in comments.
+# Use /proc/version as ground truth — it reports the actual compiler the
+# running kernel was built with. .config and Makefile can have stale or
+# misleading clang references even on gcc-built kernels.
 KERN_CC="gcc"
-if [ -f "/lib/modules/$(uname -r)/build/.config" ]; then
-    if grep -q '^CONFIG_CC_IS_CLANG=y' "/lib/modules/$(uname -r)/build/.config" 2>/dev/null; then
-        KERN_CC="clang"
-    fi
+if grep -q "clang version" /proc/version 2>/dev/null; then
+    KERN_CC="clang"
 fi
 
 # ================================================================
