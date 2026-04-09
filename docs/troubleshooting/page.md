@@ -351,29 +351,21 @@ systemctl --user restart pipewire wireplumber
 
 **Symptom:** `dmesg` shows xHCI ring buffer errors or EP6 overflow messages. Audio crackles or drops.
 
-**Cause:** The Apollo Solo USB sends JFK notification packets on EP6 IN at approximately 2000 packets/second. Intel xHCI controllers overflow their interrupt ring buffer under this load. AMD USB controllers handle it gracefully.
+**Cause:** The Apollo Solo USB sends JFK notification packets on EP6 IN at approximately 2000 packets/second. Intel xHCI controllers can overflow their interrupt ring buffer under this load.
 
-**Fix:** The EP6 drain daemon (started by `tools/usb-dsp-init.py --daemon`) continuously drains EP6 before it overflows. If you are running the daemon and still see errors, ensure it started after the patched module loaded:
+**Fix:** Use the one-shot `usb-full-init.py` init sequence rather than the lightweight `usb-dsp-init.py`. The full init stabilizes the FPGA state and eliminates the overflow condition on Intel xHCI. The EP6 drain daemon is no longer part of the recommended stack.
 
+### Capture returns zeros through PipeWire (resolved as of 2026-04-09)
+
+**Symptom:** PipeWire capture returns silence even though raw `arecord` works.
+
+**Cause (resolved):** `snd-usb-audio` was resetting Interface 3 to alt=0 when PipeWire closed a capture stream, wiping the FPGA capture routing programmed by `usb-full-init.py`. The fourth snd-usb-audio patch (`quirks.c`, `QUIRK_FLAG_IFACE_SKIP_CLOSE`) prevents this interface reset.
+
+**Fix:** Reinstall with the latest `scripts/install-usb.sh` — this builds the four-patch snd-usb-audio module. If you had the three-patch version, run:
 ```bash
-# Confirm the drain daemon is running
-pgrep -af usb-dsp-init
-
-# Restart if needed
-sudo python3 /opt/open-apollo/tools/usb-dsp-init.py --daemon &
+sudo bash scripts/install-usb.sh
 ```
-
-### Capture returns zeros through PipeWire
-
-**Symptom:** Raw `arecord -D hw:USB ...` captures audio correctly, but recording via PipeWire (e.g., OBS, Ardour) produces silence.
-
-**Cause:** Known issue as of April 2026. Suspected channel mapping or stream-open ordering interaction between PipeWire and the patched `snd-usb-audio` module when capture streams are opened after playback.
-
-**Workaround:** Use raw ALSA capture with `arecord` until this is resolved, or stop PipeWire before recording:
-```bash
-systemctl --user stop pipewire pipewire-pulse wireplumber
-arecord -D hw:USB -f S32_LE -r 48000 -c 10 output.wav
-```
+After reinstall, run `usb-full-init.py` before `modprobe snd_usb_audio` and PipeWire capture will work correctly.
 
 ### Full init crashes at packet 28 (capture not working after usb-full-init.py)
 
@@ -390,18 +382,19 @@ Capture with `usb-full-init.py` will only work if your firmware matches the capt
 python3 tools/fx3-load.py --info
 ```
 
-### DSP init must run after snd-usb-audio loads (ordering issue)
+### DSP init ordering — run full init BEFORE loading snd-usb-audio
 
-**Symptom:** DSP init runs but audio endpoints remain broken. SET_INTERFACE calls after init wipe the FPGA routing table.
+**Symptom:** DSP init runs but audio endpoints remain broken. Capture returns silence.
 
-**Cause:** When `snd-usb-audio` opens or closes a stream, it issues SET_INTERFACE to switch alternate settings, which resets FPGA state. If the DSP init runs before the module has fully probed (and before any stream opens/closes), the routing table gets cleared.
+**Cause:** The correct init order is the inverse of what was previously documented. `usb-full-init.py` must run first to program the FPGA, then `snd-usb-audio` loads. The `QUIRK_FLAG_IFACE_SKIP_CLOSE` patch (patch 4) keeps the interface state stable once the module is loaded — `snd-usb-audio` will no longer reset Interface 3 on stream close.
 
 **Fix:** The correct ordering is:
-1. Load patched `snd-usb-audio` module (let it fully probe)
-2. Run `tools/usb-dsp-init.py` (or wait for udev to trigger it)
-3. Start PipeWire
+1. Upload firmware (`tools/fx3-load.py` or udev auto-trigger)
+2. Run `tools/usb-full-init.py` (38 packets — FPGA activate, CONFIG_A/B, routing table, DSP program load, clock, monitor level)
+3. Load patched `snd-usb-audio` (`sudo modprobe snd_usb_audio`)
+4. Start PipeWire
 
-The udev rule in `configs/udev/99-apollo-usb.rules` includes a `sleep 3` delay after module load to respect this ordering.
+The udev rule in `configs/udev/99-apollo-usb.rules` handles this ordering automatically on plug-in.
 
 ---
 

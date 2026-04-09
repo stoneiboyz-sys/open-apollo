@@ -346,7 +346,7 @@ cd open-apollo
 sudo bash scripts/install-usb.sh
 ```
 
-The installer handles: dependency installation, FX3 firmware setup (prompts if missing), patched `snd-usb-audio` kernel module build (three patches — see below), DSP init daemon deployment, udev rule deployment, and PipeWire configuration.
+The installer handles: dependency installation, FX3 firmware setup (prompts if missing), patched `snd-usb-audio` kernel module build (four patches — see below), DSP init script deployment, udev rule deployment, and PipeWire configuration.
 
 {% callout type="note" %}
 The Apollo must be plugged into a **USB 3.0** port. USB 2.0 cables and ports are not supported — the FX3 re-enumerates at SuperSpeed after firmware upload.
@@ -356,35 +356,27 @@ Firmware files (`ApolloSolo.bin`, etc.) can be obtained from UA's firmware page 
 
 ### What the installer patches in snd-usb-audio
 
-The stock `snd-usb-audio` module cannot work with Apollo USB devices. The installer builds an out-of-tree module with three patches:
+The stock `snd-usb-audio` module cannot work with Apollo USB devices. The installer builds an out-of-tree module with four patches:
 
 1. **format.c** — fixed-rate quirk: when `GET_RANGE` STALLs (UA devices don't implement it), fall back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz)
 2. **implicit.c** — `IMPLICIT_FB_SKIP_DEV` for VID `0x2B5A`: prevents EP 0x83 feedback endpoint conflict that blocks stream open
 3. **endpoint.c** — skips `endpoint_compatible()` check for UA VID: prevents "Incompatible EP setup" errors
+4. **quirks.c** — `QUIRK_FLAG_IFACE_SKIP_CLOSE` for VID `0x2B5A`: prevents `snd-usb-audio` from resetting Interface 3 to alt=0 when PipeWire closes capture streams. Without this, closing a capture stream wipes the FPGA routing programmed by `usb-full-init.py` and subsequent captures return silence
 
 ### What runs automatically after plug-in
 
 Once installed, the udev rule (`/etc/udev/rules.d/99-apollo-usb.rules`) handles the full init sequence on each plug-in:
 
 1. `fx3-load.py` uploads `ApolloSolo.bin` to the Cypress FX3 (firmware loader PID → audio PID)
-2. A 3-second delay lets `snd-usb-audio` fully probe the device
-3. `usb-dsp-init.py --daemon` activates the FPGA, sets sample rate, and starts the EP6 drain daemon
+2. `usb-full-init.py` runs once — FPGA activate, CONFIG_A/B, routing table, DSP program load, clock set, monitor level (38 packets total)
+3. `modprobe snd_usb_audio` loads the patched module
+4. PipeWire detects the device and virtual loopbacks appear
 
-The EP6 drain daemon is required on Intel xHCI controllers — without it, the Apollo's JFK notification flood (~2000 packets/sec) overflows the interrupt ring buffer and causes audio dropouts.
-
-### Capture (10ch recording)
-
-Playback (6ch) works automatically after plug-in. For capture, full DSP initialization is required:
-
-```bash
-sudo python3 tools/usb-full-init.py
-```
+No daemon is started. The one-shot init is stable — the FPGA state persists across SET_INTERFACE calls because of the `QUIRK_FLAG_IFACE_SKIP_CLOSE` patch.
 
 {% callout type="warning" title="Firmware version dependency" %}
-`usb-full-init.py` replays a 38-packet init sequence captured from Cauldron firmware v1.3 build 3. If your device runs a different firmware build, the sequence may crash at packet 28 (SRAM address mismatch). If this happens, unplug and re-plug the device to recover, and use the lightweight init for playback-only.
+`usb-full-init.py` replays a 38-packet init sequence captured from Cauldron firmware v1.3 build 3. If your device runs a different firmware build, the sequence may crash at packet 28 (SRAM address mismatch). If this happens, unplug and re-plug the device to recover. Playback (6ch) will still work without the full init — only capture is affected.
 {% /callout %}
-
-Capture through PipeWire currently returns silence even when raw ALSA capture works. Use `arecord -D hw:USB` as a workaround until this is resolved.
 
 ---
 
@@ -401,10 +393,10 @@ Ubuntu 24.04 is the primary tested platform. Install testing was performed on ov
 
 ### Hardware-verified (USB — Apollo Solo USB)
 
-| Distro | Kernel | USB Controller | Playback | Capture |
-|--------|--------|---------------|----------|---------|
-| Ubuntu Studio 24.04 | 6.17.0-20-generic | Intel Tiger Lake-H xHCI | Working | Working (usb-full-init.py) |
-| CachyOS | 6.19.10-1-cachyos | AMD USB | Working | Needs usb-full-init.py |
+| Distro | Kernel | USB Controller | Playback | Capture | PipeWire Capture |
+|--------|--------|---------------|----------|---------|-----------------|
+| Ubuntu Studio 24.04 | 6.17.0-20-generic (gcc) | Intel Tiger Lake-H xHCI | Working | Working | Working — Discord, pw-record confirmed |
+| CachyOS | 6.19.10-1-cachyos | AMD USB | Working | usb-full-init.py crashes at packet 28 (firmware mismatch) | Not tested |
 
 ### Docker install matrix (build + config deploy, no hardware)
 

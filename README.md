@@ -34,24 +34,26 @@ stack for USB models, along with a mixer daemon and system tray indicator.
 
 ## What Works (Apollo Solo USB)
 
+Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @stoneiboyz-sys:
+
 - **6ch playback** — S32_LE 48kHz, confirmed on Ubuntu Studio 24.04 (Intel) and CachyOS (AMD)
-- **10ch capture** — requires full DSP program load (`usb-full-init.py`); firmware-version-specific
+- **10ch capture** — confirmed working; one-shot `usb-full-init.py` (38 packets, includes DSP program load), then `modprobe snd_usb_audio`
+- **PipeWire capture** — mic input working end-to-end; Discord voice calls, `pw-record`, browser tabs confirmed
+- **Hardware monitoring** — mic → headphones simultaneous with active PipeWire streams
 - **Preamp control** — gain, 48V phantom power, mic/line switching via vendor control
 - **Monitor control** — level, mute, mono
 - **PipeWire playback** — browser audio, system audio, DAWs all work
-- **EP6 drain daemon** — prevents Intel xHCI buffer overruns from FPGA notification packets
-- **Patched snd-usb-audio** — three out-of-tree patches (fixed-rate quirk, implicit feedback skip, endpoint compat bypass)
-- **Automatic init via udev** — firmware upload + DSP init on device plug-in
+- **Patched snd-usb-audio** — four out-of-tree patches (fixed-rate quirk, implicit feedback skip, endpoint compat bypass, IFACE_SKIP_CLOSE)
+- **Automatic init via udev** — firmware upload + full DSP init on device plug-in; no daemon required
 
 ### USB Known Issues
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| **Capture requires full DSP init** | Partial | `usb-full-init.py` needed; init sequence is firmware-version-specific |
-| **Intel xHCI EP6 flood** | Fixed | EP6 drain daemon prevents buffer overruns on Intel USB controllers |
-| **PipeWire capture zeros** | Open | Raw ALSA capture works but PipeWire capture returns zeros; channel mapping under investigation |
-| **Full init crash at packet 28** | Known | Some firmware builds crash on IIR biquad SRAM write (address mismatch); provide a fresh Windows capture if affected |
-| **DSP init ordering** | Documented | Module must load before daemon starts; SET_INTERFACE wipes FPGA routing |
+| **Full init crash at packet 28** | Known | Some firmware builds crash on IIR biquad SRAM write (address mismatch); observed on CachyOS/AMD (@ariahello) with a different Cauldron build. Playback still works |
+| **Intel xHCI EP6 flood** | Resolved | One-shot `usb-full-init.py` stabilizes device; EP6 drain daemon removed from stack |
+| **PipeWire capture zeros** | Fixed | Resolved by `QUIRK_FLAG_IFACE_SKIP_CLOSE` patch (quirks.c, patch 4) — prevents snd-usb-audio from resetting Interface 3 on stream close |
+| **DSP init ordering** | Documented | `usb-full-init.py` runs before `modprobe snd_usb_audio`; reversed from previous documentation |
 
 {% callout type="note" %}
 USB support uses `sudo bash scripts/install-usb.sh`. See [USB Quick Start](#usb-quick-start-apollo-solo-usb) below.
@@ -76,7 +78,7 @@ USB support uses `sudo bash scripts/install-usb.sh`. See [USB Quick Start](#usb-
 |-----|--------|-------|
 | **Chromium / Chrome** | Verified | Recommended browser for WebRTC capture |
 | **Firefox .deb** | Untested | Should work; Snap version crashes (see Known Issues) |
-| **Discord .deb** | Untested | Expected to work via PulseAudio bridge |
+| **Discord .deb** | Verified (USB) | Voice calls with mic input confirmed on Apollo Solo USB (Ubuntu Studio 24.04) |
 | **OBS Studio** | Untested | Should work natively with PipeWire |
 | **Ardour** | Partial | Use `pw-jack ardour7`; don't let it grab ALSA directly |
 | **Audacity** | Partial | Flatpak version only (Ubuntu .deb lacks PipeWire backend) |

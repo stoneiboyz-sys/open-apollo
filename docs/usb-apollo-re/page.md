@@ -129,30 +129,26 @@ Files located at `C:\Program Files (x86)\Universal Audio\Powered Plugins\Firmwar
 ### Working
 - [x] FX3 firmware upload from Linux (`tools/fx3-load.py`), udev auto-load on device plug
 - [x] Device re-enumerates as UAC 2.0 audio + vendor DSP
-- [x] `snd-usb-audio` claims device with three patches applied (see below)
+- [x] `snd-usb-audio` claims device with four patches applied (see below)
 - [x] Clock source responds at 48kHz after DSP init
 - [x] **6ch ALSA playback** (S32_LE 48kHz) — confirmed on Ubuntu Studio 24.04 (kernel 6.17, Intel Tiger Lake-H) and CachyOS (kernel 6.19, AMD USB)
+- [x] **10ch ALSA capture** — confirmed on Ubuntu Studio 24.04 with `usb-full-init.py` (one-shot, 38 packets including DSP program load)
+- [x] **PipeWire capture** — mic input working end-to-end (Discord voice calls, `pw-record`); confirmed on Ubuntu Studio 24.04 / Intel Tiger Lake-H
 - [x] PipeWire playback — browser audio, system audio working
-- [x] DSP init — FPGA activation, CONFIG_A/B, identity routing table, clock set, monitor level (`tools/usb-dsp-init.py`)
-- [x] EP6 drain daemon — prevents Intel xHCI buffer overruns from JFK notification packets
-- [x] Mixer settings via vendor control 0x03 — preamp gain, 48V, monitor level/mute
-
-### Partially Working
-- [~] **10ch ALSA capture** — works with full DSP program load (`tools/usb-full-init.py`), but the init sequence is firmware-version-specific. Some firmware builds crash at packet 28 (IIR biquad writes to a moved SRAM address)
-- [~] **Hardware monitoring** (mic → headphones) — works when PipeWire is stopped
-- [~] **Mixer settings** — work via vendor control 0x03 but may stop responding after full DSP init (`usb-full-init.py`)
+- [x] **Hardware monitoring** (mic → headphones) simultaneous with PipeWire streams
+- [x] DSP init — FPGA activation, CONFIG_A/B, routing table, DSP program load, clock set, monitor level (`tools/usb-full-init.py`, one-shot, no daemon required)
+- [x] Mixer settings via vendor control 0x03 — preamp gain, 48V, monitor level/mute (seq counter fix applied)
 
 ### Known Issues
-- **SET_INTERFACE resets FPGA state** — when `snd-usb-audio` opens/closes streams, SET_INTERFACE can wipe the routing table. DSP init must run AFTER module probe, not before
-- **EP6 interrupt flood on Intel xHCI** — the Apollo pushes JFK notifications at ~2000/sec. Intel xHCI controllers overflow; AMD handles it gracefully. Fix: EP6 drain daemon in `tools/usb-dsp-init.py`
-- **Interface 0 contention** — the DSP init daemon and `snd-usb-audio` can conflict on Interface 0 (vendor DSP). Correct ordering: load patched module first, then start daemon
-- **Firmware-specific init sequence** — the captured 38-packet init from Cauldron 1.3 build 3 works on some devices but crashes others at packet 28 (SRAM address mismatch in IIR biquad writes)
-- **Capture through PipeWire returns zeros** — raw ALSA capture works but PipeWire returns silence. Channel mapping or stream-open interaction needs investigation
+- **SET_INTERFACE resets FPGA state on stream close** — fixed by `QUIRK_FLAG_IFACE_SKIP_CLOSE` patch (quirks.c, patch 4). Without it, closing a capture stream resets Interface 3 to alt=0 and wipes FPGA capture routing
+- **EP6 interrupt flood on Intel xHCI** — the Apollo pushes JFK notifications at ~2000/sec. No longer requires a drain daemon; the one-shot `usb-full-init.py` init stabilizes the device. AMD controllers handle it gracefully without any workaround
+- **Firmware-specific init sequence** — the captured 38-packet init from Cauldron 1.3 build 3 works on some devices but crashes others at packet 28 (SRAM address mismatch in IIR biquad writes). Observed with CachyOS/AMD contributor (@ariahello) using a different Cauldron build
+- **Interface 0 contention (resolved)** — EP6 drain daemon was causing Interface 0 conflicts with `snd-usb-audio`. Daemon has been removed from the stack entirely
 
 ### Required Init Order
 1. Upload firmware (`tools/fx3-load.py` or udev auto-trigger)
-2. Load patched `snd-usb-audio` module
-3. Start `tools/usb-dsp-init.py --daemon` (or `tools/usb-full-init.py` for capture)
+2. Run `tools/usb-full-init.py` (one-shot: FPGA activate, CONFIG_A/B, routing table, DSP program load, clock, monitor level — 38 packets)
+3. Load patched `snd-usb-audio` module (`modprobe snd_usb_audio`)
 4. Start PipeWire
 
 ## Windows Driver Stack
@@ -233,13 +229,14 @@ Replay of Windows init sequence via `tools/usb-dsp-init.py` **works**:
 - Status query returns 388B state
 - Clock reads 48000 Hz after init
 
-## snd-usb-audio Kernel Patches — Three Patches Applied
+## snd-usb-audio Kernel Patches — Four Patches Applied
 
-Compiled out-of-tree module from v6.17 kernel source with three patches:
+Compiled out-of-tree module from v6.17 kernel source with four patches:
 
 1. **`format.c`** — fixed-rate quirk: bypasses `GET_RANGE` STALL by falling back to hardcoded rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) for VID `0x2B5A`
 2. **`implicit.c`** — adds `IMPLICIT_FB_SKIP_DEV` flag to prevent EP 0x83 feedback endpoint conflict
 3. **`endpoint.c`** — skips `endpoint_compatible()` check for UA VID, preventing "Incompatible EP setup" errors during stream open
+4. **`quirks.c`** — `QUIRK_FLAG_IFACE_SKIP_CLOSE` for VID `0x2B5A`: prevents `snd-usb-audio` from resetting Interface 3 to alt=0 when PipeWire closes capture streams. Without this, stream close wipes the FPGA capture routing programmed by `usb-full-init.py`, causing subsequent captures to return silence
 
 Build notes:
 - Add `#include <linux/usb/audio-v2.h>` and `<linux/usb/audio-v3.h>` to mixer_maps.c
@@ -362,19 +359,20 @@ Outputs: 0=HP, 1=CUE 2, 2=CUE 3, 3=CUE 4, 4=MONITOR, 5=HP
 - [x] ~~Map preamp gain, 48V, mic/line, monitor level/mute/mono~~ — from mixer-knobs.pcap
 - [x] ~~Test mixer settings writes on Linux~~ — verified, capture routing confirmed with signal
 - [x] ~~PipeWire integration~~ — `configs/pipewire/setup-apollo-solo-usb.sh`, Mic 1/2, Monitor, Headphone devices
-- [x] ~~EP6 drain daemon~~ — prevents Intel xHCI JFK notification flood
-- [ ] Fix firmware-version-specific SRAM crash at packet 28 (IIR biquad address)
-- [ ] Fix capture through PipeWire (returns zeros — channel mapping or stream-open interaction)
+- [x] ~~EP6 drain daemon~~ — no longer needed; one-shot `usb-full-init.py` stabilizes device; daemon removed from stack
+- [x] ~~Fix capture through PipeWire~~ — resolved by `QUIRK_FLAG_IFACE_SKIP_CLOSE` patch (quirks.c) preventing Interface 3 reset on stream close
+- [x] ~~Fix mixer settings lockup after `usb-full-init.py`~~ — resolved by seq counter fix in vendor request 0x03
+- [ ] Fix firmware-version-specific SRAM crash at packet 28 (IIR biquad address) — active issue for CachyOS/AMD contributor (@ariahello, different Cauldron build)
 - [ ] Map remaining settings: dim, pad, hiz, lowcut, phase, fader, pan, sends
-- [ ] Submit kernel patches upstream (alsa-devel) — 3 patches ready
-- [ ] Investigate mixer settings lockup after `usb-full-init.py`
+- [ ] Submit kernel patches upstream (alsa-devel) — 4 patches ready
+- [ ] Tag v1.4.0 once clean install from scratch is validated
 
 ## Test Environments
 
 | System | Kernel | USB Controller | Status |
 |--------|--------|---------------|--------|
-| Ubuntu Studio 24.04, Intel Tiger Lake-H | 6.17.0-20-generic | Intel xHCI | Playback + capture confirmed |
-| CachyOS, AMD | 6.19.10-1-cachyos | AMD USB | Playback confirmed; capture needs `usb-full-init.py` |
+| Ubuntu Studio 24.04, Intel Tiger Lake-H | 6.17.0-20-generic (gcc) | Intel xHCI | Full duplex confirmed — 6ch play + 10ch capture at 48kHz; PipeWire capture, Discord, hardware monitoring all working |
+| CachyOS, AMD | 6.19.10-1-cachyos | AMD USB | Playback confirmed; `usb-full-init.py` crashes at packet 28 (firmware version mismatch — Cauldron build differs) |
 
 - **Model**: Apollo Solo USB (USB-C edition)
 - **Firmware Loader Serial**: `0000000004BE`

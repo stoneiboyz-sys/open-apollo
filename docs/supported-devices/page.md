@@ -31,11 +31,11 @@ Open Apollo supports Universal Audio Apollo Thunderbolt and USB interfaces. Thun
 
 ## USB devices
 
-USB Apollo models use UAC 2.0 audio. No kernel module is required — the FX3 firmware is uploaded from userspace on each power-on, and `snd-usb-audio` (with a 3-line patch) handles audio streaming. See [USB RE findings](/docs/usb-apollo-re) for protocol details.
+USB Apollo models use UAC 2.0 audio. No kernel module is required — the FX3 firmware is uploaded from userspace on each power-on, and `snd-usb-audio` (with a 4-patch out-of-tree build) handles audio streaming. See [USB RE findings](/docs/usb-apollo-re) for protocol details.
 
 | Model | VID | PID (live) | Playback | Record | Preamps | HiZ | Status |
 |---|---|---|---|---|---|---|---|
-| Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Partially Verified** |
+| Apollo Solo USB | 0x2B5A | 0x000D | 6 | 10 | 2 | 2 | **Verified** |
 | Apollo Twin USB | 0x2B5A | 0x0002 | — | — | 2 | 2 | Needs Testing |
 | Apollo Twin X USB | 0x2B5A | 0x000F | — | — | 2 | 2 | Needs Testing |
 
@@ -72,16 +72,19 @@ The Apollo x4 is the primary development and test device. On this model, the fol
 
 ### USB (Apollo Solo USB)
 
-The Apollo Solo USB is "Partially Verified" — playback is confirmed working; capture has known issues:
+The Apollo Solo USB is fully verified on Ubuntu Studio 24.04 / Intel Tiger Lake-H (confirmed by contributor @stoneiboyz-sys). Full duplex is working with no daemon required:
 
 - **6ch playback** (S32_LE 48kHz) confirmed on Ubuntu Studio 24.04 (kernel 6.17, Intel) and CachyOS (kernel 6.19, AMD)
-- **PipeWire playback** — browser audio, system audio working
-- **Preamp gain, 48V, monitor level/mute** — working via mixer daemon
-- **10ch capture** — works with `usb-full-init.py` but the init sequence is firmware-version-specific; some firmware builds crash at packet 28
-- **Capture through PipeWire** — returns zeros even when raw ALSA capture works (under investigation)
-- Hardware monitoring (mic → headphones) works when PipeWire is stopped
+- **10ch capture** — confirmed working on Ubuntu Studio 24.04; one-shot `usb-full-init.py` (38 packets, includes DSP program load) then `modprobe snd_usb_audio`
+- **PipeWire capture** — mic input working; Discord voice calls and `pw-record` confirmed
+- **PipeWire playback** — browser audio, system audio, DAWs working
+- **Hardware monitoring** — mic → headphones simultaneous with active PipeWire streams
+- **Preamp gain, 48V, monitor level/mute** — working via vendor control 0x03 (seq counter fix applied)
+- **No daemon required** — EP6 drain daemon removed; one-shot init is stable
 
-See [USB RE findings](/docs/usb-apollo-re) for the full protocol details and known issues.
+Known limitation: `usb-full-init.py` crashes at packet 28 on some firmware builds (IIR biquad SRAM address mismatch — observed on CachyOS/AMD with a different Cauldron build). Playback-only still works on those systems.
+
+See [USB RE findings](/docs/usb-apollo-re) for the full protocol details.
 
 ---
 
