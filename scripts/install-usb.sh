@@ -87,6 +87,19 @@ esac
 ok "Distro: ${DISTRO:-unknown}"
 info "Kernel: $KERNEL | Arch: $ARCH"
 
+# Snapshot pre-existing install state before we change anything.  The
+# fail-closed exit paths use these to produce state-honest messages —
+# e.g. if the user is re-running the installer with a prior working
+# install already in place, the "udev hooks not installed" warning would
+# be wrong and misleading.
+PREEXISTING_KO=0
+PREEXISTING_UDEV=0
+PREEXISTING_HELPERS=0
+[ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ] && PREEXISTING_KO=1
+[ -f "/etc/udev/rules.d/99-apollo-usb.rules" ] && PREEXISTING_UDEV=1
+[ -d "/usr/local/lib/ua-usb" ] && [ -x "/usr/local/bin/ua-usb-init" ] \
+    && [ -x "/usr/local/bin/ua-usb-dsp-init" ] && PREEXISTING_HELPERS=1
+
 # ================================================================
 # Step 2: Check for Apollo USB device
 # ================================================================
@@ -544,22 +557,45 @@ if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
     info ""
     warn "Install INCOMPLETE"
     info ""
-    info "What IS done:"
-    info "    • Patched snd-usb-audio.ko built and copied to"
-    info "      /lib/modules/$KERNEL/updates/"
+
+    # Drive the "what IS done" section from actual disk state, not from
+    # assumptions about what this particular run did.  A user re-running
+    # the installer with an already-working install present will hit a
+    # completely different recovery path than a first-time install.
+
+    info "Current on-disk state:"
+    if [ "$BUILD_SUCCESS" = "1" ]; then
+        info "    • Patched snd-usb-audio.ko BUILT and installed this run"
+        info "      ($SND_USB_BUILD/sound/usb/snd-usb-audio.ko →"
+        info "       /lib/modules/$KERNEL/updates/snd-usb-audio.ko)"
+    elif [ "$PREEXISTING_KO" = "1" ]; then
+        info "    • Patched snd-usb-audio.ko from a prior install is present at"
+        info "      /lib/modules/$KERNEL/updates/snd-usb-audio.ko"
+        info "      (this run did not rebuild it)"
+    fi
+
+    if [ "$PREEXISTING_UDEV" = "1" ] && [ "$PREEXISTING_HELPERS" = "1" ]; then
+        info "    • udev rules + helper scripts already installed from a prior run"
+        info ""
+        info "Reboot-recovery path (auto-init hooks already in place):"
+        info "    1. Reboot — the patched .ko will load automatically, and udev"
+        info "       will upload firmware and run DSP init on device enumeration."
+        info "    2. If the Apollo still does not produce audio after reboot,"
+        info "       re-run install-usb.sh with audio clients closed."
+    else
+        info "    • udev auto-init hooks NOT installed"
+        info "      (Apollo needs firmware upload on every power-on, done by"
+        info "       the udev rule that Step 6b would install)"
+        info ""
+        info "A plain reboot will NOT complete this install without the udev"
+        info "hooks — the device would come up at the loader PID with no audio."
+    fi
+
     info ""
-    info "What is NOT done (and what reboot alone will NOT fix):"
-    info "    • udev rules for firmware upload + DSP init (Apollo needs fresh"
-    info "      firmware every power-on; without the udev hook it stays at the"
-    info "      loader PID and produces no audio even with the patched module)"
-    info "    • FPGA routing / DSP program init via usb-full-init.py"
-    info ""
-    info "Recovery — you MUST re-run install-usb.sh after closing audio clients:"
+    info "Recommended recovery — close audio clients and re-run the installer:"
     info "    sudo systemctl --user stop pipewire wireplumber pipewire-pulse"
     info "    sudo bash $PROJECT_DIR/scripts/install-usb.sh"
     info ""
-    info "A plain reboot will NOT complete this install — the udev auto-init"
-    info "hooks are only persisted once snd_usb_audio can be cleanly swapped."
     exit 2
 fi
 

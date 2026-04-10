@@ -121,12 +121,13 @@ fi
 # ================================================================
 header "Restoring stock snd-usb-audio"
 
-# UNLOAD_FAILED gates the final status message.  If we can't drop the
-# patched module from memory (audio apps holding it), we still wipe the
-# on-disk artifacts so next reboot lands on stock, but we refuse to
-# report "Uninstall Complete" and exit non-zero — operators need to know
-# the running kernel state does not yet match disk state.
+# UNLOAD_FAILED and RELOAD_FAILED gate the final status message.
+#   - UNLOAD_FAILED=1: patched module still resident in memory
+#   - RELOAD_FAILED=1: stock module did not load back
+# Either condition downgrades the final status from "Complete" to
+# "Partial" with explicit recovery guidance and a non-zero exit.
 UNLOAD_FAILED=0
+RELOAD_FAILED=0
 
 if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
     modprobe -r snd_usb_audio 2>/dev/null || rmmod snd_usb_audio 2>/dev/null || true
@@ -148,14 +149,19 @@ done
 
 depmod -a 2>/dev/null || true
 
-# Only attempt to reload stock if the earlier unload succeeded — otherwise
-# modprobe is a no-op (patched is already loaded) and would print a
-# misleading "stock loaded" message from modinfo's disk-state view.
+# Reload stock only if the earlier unload succeeded.  If the patched
+# module is still in memory, modprobe is a no-op and modinfo's disk-state
+# view would misreport filename — skip the report entirely in that case.
+# Verify reload with lsmod so the final footer never lies about runtime
+# state (Codex pass 3 found the footer was unconditional before).
 if [ "$UNLOAD_FAILED" = "0" ]; then
     modprobe snd_usb_audio 2>/dev/null || true
     if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
         STOCK_PATH=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
         ok "Stock snd_usb_audio loaded: $STOCK_PATH"
+    else
+        RELOAD_FAILED=1
+        warn "Stock snd_usb_audio did NOT load after modprobe"
     fi
 fi
 
@@ -226,7 +232,8 @@ if [ "$PURGE" = "1" ]; then
 fi
 
 # ================================================================
-# Done — report partial vs full based on UNLOAD_FAILED
+# Done — report full, partial (unload), or partial (reload) based on
+# actual runtime state.  Both partial states exit non-zero.
 # ================================================================
 if [ "$UNLOAD_FAILED" = "1" ]; then
     header "Uninstall PARTIAL — REBOOT REQUIRED"
@@ -248,12 +255,32 @@ if [ "$UNLOAD_FAILED" = "1" ]; then
     exit 2
 fi
 
+if [ "$RELOAD_FAILED" = "1" ]; then
+    header "Uninstall PARTIAL — NO USB AUDIO DRIVER LOADED"
+    echo ""
+    fail "Stock snd_usb_audio did not reload after the patched module was removed"
+    info ""
+    info "Your machine currently has NO USB audio driver loaded.  All on-disk"
+    info "artifacts have been removed, so the stock module should load on next"
+    info "boot, but right now USB audio devices will not appear."
+    info ""
+    info "Recovery options:"
+    info "    1. Try loading manually:  sudo modprobe snd_usb_audio"
+    info "       If that fails, check:  sudo dmesg | tail -20"
+    info "    2. If manual modprobe errors, stock snd-usb-audio may be missing"
+    info "       from your kernel package — reinstall the package that ships it"
+    info "       (e.g. 'linux', 'linux-cachyos', 'linux-image-generic')."
+    info "    3. Reboot — if stock loads at boot, you are fully recovered."
+    echo ""
+    exit 2
+fi
+
 header "Uninstall Complete"
 echo ""
 ok "All USB install artifacts removed"
 if [ "$PURGE" = "0" ]; then
     info "Firmware preserved at /lib/firmware/universal-audio/ (use --purge to wipe)"
 fi
-info "Stock snd-usb-audio is reloaded — Apollo still appears but with limited functionality"
+info "Stock snd-usb-audio is loaded — Apollo still appears but with limited functionality"
 info "Power-cycle the Apollo before the next install for a clean slate"
 echo ""
