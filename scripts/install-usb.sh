@@ -515,6 +515,48 @@ run_sudo modprobe -r snd_usb_audio 2>/dev/null || \
     run_sudo rmmod snd_usb_audio 2>/dev/null || true
 sleep 1
 
+# Verify the old module is actually gone from memory.  If PipeWire or
+# another ALSA client is still holding it, Linux keeps the in-memory
+# module and the later `modprobe snd_usb_audio` is a no-op — the user
+# ends up with the OLD driver running while the patched .ko sits unused
+# on disk.  Fail-closed: abort BEFORE DSP init and BEFORE installing
+# udev hooks so nothing new is persisted in a half-broken state.
+if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
+    warn "snd_usb_audio still loaded after first unload — retrying in 3s..."
+    sleep 3
+    run_sudo modprobe -r snd_usb_audio 2>/dev/null || \
+        run_sudo rmmod snd_usb_audio 2>/dev/null || true
+fi
+
+if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
+    fail "Could not unload snd_usb_audio — still held by a running process"
+    info ""
+    info "Processes holding /dev/snd/*:"
+    if command -v fuser &>/dev/null; then
+        run_sudo fuser -v /dev/snd/* 2>&1 | sed 's/^/    /' || true
+    elif command -v lsof &>/dev/null; then
+        run_sudo lsof /dev/snd/* 2>/dev/null | sed 's/^/    /' || true
+    else
+        info "    (install psmisc or lsof to list holders)"
+    fi
+    info ""
+    info "Common culprits: pipewire, pulseaudio, browsers, music players, calls"
+    info ""
+    info "The patched module IS built and installed at:"
+    info "    /lib/modules/$KERNEL/updates/snd-usb-audio.ko"
+    info "It will activate automatically on next REBOOT."
+    info ""
+    info "To activate NOW without reboot, close audio clients and run:"
+    info "    sudo systemctl --user stop pipewire wireplumber pipewire-pulse"
+    info "    sudo modprobe -r snd_usb_audio && sudo modprobe snd_usb_audio"
+    info "    sudo bash $PROJECT_DIR/scripts/install-usb.sh   # re-run to finish"
+    info ""
+    warn "Install INCOMPLETE — reboot required (or manual steps above)"
+    exit 2
+fi
+
+ok "snd_usb_audio unloaded cleanly — safe to proceed"
+
 # Step B: Run full DSP init (38 packets including DSP program load for capture)
 if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
     info "Running full DSP init (FPGA + routing + DSP program + monitor)..."
@@ -532,6 +574,26 @@ if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
     info "Loading patched snd-usb-audio..."
     run_sudo modprobe snd_usb_audio
     sleep 2
+
+    # Verify the freshly loaded module is actually our patched copy.
+    # Standard depmod prefers updates/ over kernel/ but custom
+    # /etc/depmod.d/ search-order config could flip that — the unload
+    # gate above prevents the OLD module from persisting, but it can't
+    # prevent modprobe from picking the wrong on-disk copy.
+    loaded_path=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
+    case "$loaded_path" in
+        */updates/snd-usb-audio.ko*)
+            ok "Patched snd-usb-audio loaded: $loaded_path"
+            ;;
+        "")
+            warn "snd_usb_audio did not load (modprobe may have failed)"
+            ;;
+        *)
+            warn "snd_usb_audio loaded from $loaded_path — expected updates/ path"
+            warn "Check /etc/depmod.d/ for a search-order override."
+            ;;
+    esac
+
     if grep -qi "Apollo" /proc/asound/cards 2>/dev/null; then
         ok "ALSA card detected: $(grep -i Apollo /proc/asound/cards | head -1 | xargs)"
     else
