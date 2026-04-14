@@ -131,11 +131,20 @@ def _write_monitor_and_hp(dev, level_db, muted, seq):
     return raw
 
 
-def apply_vendor_monitor_hp(dev, level_db=-12.0, *, post_rebind=False):
+def apply_vendor_monitor_hp(
+    dev,
+    level_db=-12.0,
+    *,
+    post_rebind=False,
+    seq_min=0,
+):
     """EP0-only: Monitor (LINE) + HP1 levels and unmute (two-step seq like usb-monitor-enable).
 
     post_rebind: use SEQ_VENDOR_POST_REBIND so writes beat a prior full init's 5000/5001
-    if the FPGA counter survives USB rebind.
+    if the FPGA counter survives USB re-enumeration.
+
+    seq_min: raise the chosen seq to at least this value (FPGA ignores writes when seq is
+    not strictly above its internal counter; after a long bulk init the counter may be high).
     """
     probed_seq = _probe_seq_via_jkmk(dev)
     if post_rebind:
@@ -147,6 +156,9 @@ def apply_vendor_monitor_hp(dev, level_db=-12.0, *, post_rebind=False):
     else:
         seq = 5000
         LOG.info("Settings seq: %s (safe default, above stale init counters)", seq)
+    if seq_min and not post_rebind and seq < seq_min:
+        LOG.info("  bumping seq %s -> %s (seq_min after bulk init)", seq, seq_min)
+        seq = seq_min
 
     raw = _write_monitor_and_hp(dev, level_db, False, seq)
     LOG.info(
@@ -259,6 +271,7 @@ def run_full_dsp_init(dev):
     time.sleep(0.006)
     dev.write(EP_BULK_OUT, pkt_toggle_3, timeout=1000)
     LOG.info("Mic->monitor routing + monitor-toggle DSP burst: done")
+    _drain_bulk_in_until_idle(dev, 500)
 
     dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
                       struct.pack("<I", 48000), timeout=2000)
@@ -266,10 +279,12 @@ def run_full_dsp_init(dev):
     freq = struct.unpack("<I", bytes(data))[0]
     LOG.info("Clock: %s Hz", freq)
 
+    # Vendor 0x41 (recipient = interface) while iface 0 is still claimed — releasing first
+    # can race udev/snd_usb_audio and leave monitor/HP writes ignored (hardware silent).
+    apply_vendor_monitor_hp(dev, post_rebind=False, seq_min=50000)
     usb.util.release_interface(dev, 0)
-
-    apply_vendor_monitor_hp(dev, post_rebind=False)
     LOG.info("Ready — run 'sudo modprobe snd_usb_audio' to get ALSA card")
+    LOG.info("If hardware monitor is still silent: sudo python3 tools/usb-monitor-enable.py --seq 100000")
 
 
 def main():
