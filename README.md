@@ -46,6 +46,14 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 - **Patched snd-usb-audio** — four out-of-tree patches (fixed-rate quirk, implicit feedback skip, endpoint compat bypass, IFACE_SKIP_CLOSE)
 - **Automatic init via udev** — firmware upload + full DSP init on device plug-in; no daemon required
 
+### USB project scope — base card vs DSP (do not mix the two)
+
+**Base sound card (current focus)** — What we optimize for first: the Apollo shows up as a **normal USB audio device** on Linux (firmware, `snd-usb-audio`, ALSA visible, PipeWire sinks/sources), with **playback, capture, headphones, and stable hotplug/login**. The recommended path is **`--stable-default`**. This is *not* the same goal as full Universal Audio Console / DSP parity.
+
+**DSP & console-class features (later in the project)** — Full **DSP replay** on plug-in, legacy **udev auto-init**, deeper on-device mixer behavior, and tooling that chases UA Console semantics. That track exists (e.g. **`--legacy-dsp`**, `usb-full-init.py`, mixer work) but is **explicitly secondary**: we document and harden **base-card behavior** first so users are not forced to depend on the heavy DSP path for everyday audio.
+
+Issues and PRs should state which track they target (**base card** vs **DSP / legacy**).
+
 ### USB Known Issues
 
 | Issue | Status | Notes |
@@ -229,7 +237,7 @@ Preview the installer UI only (no install): `bash scripts/install-usb.sh --demo-
 
 In **stable** mode, an interactive install also walks you through a short **Apollo power-cycle** check (USB + ALSA), then schedules a **one-shot post-reboot verification** (user systemd at next login). After login you should get a **desktop notification** (and a text recap in `~/.config/open-apollo/last-verify.txt`); full logs: `journalctl --user -u open-apollo-install-resume.service -e`. Skip that handoff with `--no-guided-verify` or `OPEN_APOLLO_SKIP_GUIDED_VERIFY=1`. After reboot you can always run `bash scripts/install-usb.sh --resume-verify` manually.
 
-The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
+The installer handles dependencies, firmware setup, kernel module build, PipeWire configuration, and (depending on mode) **light vendor init** or **full legacy DSP init**. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
 
 ### USB Stable Mode (Recommended)
 
