@@ -45,6 +45,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 - **PipeWire playback** — browser audio, system audio, DAWs all work
 - **Patched snd-usb-audio** — four out-of-tree patches (fixed-rate quirk, implicit feedback skip, endpoint compat bypass, IFACE_SKIP_CLOSE)
 - **Automatic init via udev** — firmware upload + full DSP init on device plug-in; no daemon required
+- **Session tray** — when AppIndicator is installed (`gir1.2-appindicator3-0.1` on Ubuntu), `install-usb.sh` registers autostart for `tools/open-apollo-tray.py`: icon reflects Solo USB + PipeWire readiness; menu **Buffer size (USB)** sets the ALSA period (128–2048 frames) and restarts PipeWire
 
 ### USB project scope — base card vs DSP (do not mix the two)
 
@@ -233,13 +234,15 @@ sudo bash scripts/install-usb.sh --stable-default
 sudo bash scripts/install-usb.sh --legacy-dsp
 ```
 
-Non-interactive installs (no “press Enter” prompts): `OPEN_APOLLO_ASSUME_YES=1 sudo -E bash scripts/install-usb.sh --stable-default`
+Non-interactive installs (no “press Enter” prompts): `OPEN_APOLLO_ASSUME_YES=1 sudo -E bash scripts/install-usb.sh --stable-default` — note that **this also skips the guided Apollo power-cycle step**; omit `OPEN_APOLLO_ASSUME_YES` if you want that assistant.
 
 Preview the installer UI only (no install): `bash scripts/install-usb.sh --demo-ui`
 
+**Clean uninstall → reinstall (full assistant, hot-plug + reboot test):** run `sudo bash scripts/uninstall-usb.sh` (add `--purge` only if you intend to remove firmware too). The uninstaller removes udev, patched `snd-usb-audio`, WirePlumber drops, **user systemd units** (`apollo-*`, `open-apollo-install-resume`), **`~/apollo-safe-start.sh`** / **`~/apollo-hotplug-watch.sh`**, generated **`apollo-solo-usb-io.conf`**, **`~/.config/open-apollo/`**, and tray autostart where tagged by install-usb. Then, from a **normal terminal** (not piped stdin), run `sudo bash scripts/install-usb.sh --stable-default` **without** `OPEN_APOLLO_ASSUME_YES` and **without** `--no-guided-verify`. Follow the on-screen power-cycle prompt, finish the install, **reboot** when suggested, then after login check the notification / `~/.config/open-apollo/last-verify.txt` and test hot-plug (unplug/replug Apollo, run `~/apollo-safe-start.sh` if needed).
+
 In **stable** mode, an interactive install also walks you through a short **Apollo power-cycle** check (USB + ALSA), then schedules a **one-shot post-reboot verification** (user systemd at next login). After login you should get a **desktop notification** (and a text recap in `~/.config/open-apollo/last-verify.txt`); full logs: `journalctl --user -u open-apollo-install-resume.service -e`. Skip that handoff with `--no-guided-verify` or `OPEN_APOLLO_SKIP_GUIDED_VERIFY=1`. After reboot you can always run `bash scripts/install-usb.sh --resume-verify` manually.
 
-The installer handles dependencies, firmware setup, kernel module build, PipeWire configuration, and (depending on mode) **light vendor init** or **full legacy DSP init**. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
+The installer handles dependencies, firmware setup, kernel module build, PipeWire configuration, and (depending on mode) **light vendor init** or **full legacy DSP init**. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing. With GTK/AppIndicator Python bindings available, it also drops a **tray autostart** (`~/.config/autostart/open-apollo-tray.desktop`) so you can see plug-in status and change the USB ALSA buffer from the menu; otherwise install those packages and run `python3 tools/open-apollo-tray.py` once manually.
 
 ### USB Stable Mode (Recommended)
 

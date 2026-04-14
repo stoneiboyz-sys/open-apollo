@@ -40,6 +40,24 @@ Restart WirePlumber after editing. If names do not change, check `journalctl --u
 
 **Note:** `pactl list short sinks` shows the **sink Name** (the stable PipeWire id string) — it will stay long. Check the human label with `pactl list sinks` (look for `Description:`) or `wpctl inspect <id>` for `node.description` / `node.nick`.
 
+## Buffer size (Apollo Solo USB)
+
+**ALSA-side buffer** (what you usually tweak for latency vs xruns) is set in WirePlumber `alsa_monitor` rules on the USB card. Edit the three locals at the top of `configs/wireplumber/main.lua.d/53-apollo-solo-usb-performance.lua` (installed to `~/.config/wireplumber/main.lua.d/`), then:
+
+`systemctl --user restart wireplumber pipewire`
+
+Defaults: `period-size` 512, `period-num` 64, `headroom` 512. Smaller `PERIOD_SIZE` → lower latency, more risk of underruns; larger → the opposite. After `install-usb.sh`, the session tray (`tools/open-apollo-tray.py`, autostart when AppIndicator is installed) can change the USB period from the menu without editing this file by hand.
+
+**Graph quantum** (PipeWire-wide processing buffer, not the same as ALSA period) lives in `~/.config/pipewire/pipewire.conf.d/*.conf` via `default.clock.*` — see [PipeWire clock docs](https://docs.pipewire.org/page_daemon_conf.html). Sample-rate notes (mostly Thunderbolt) are in [sample-rates](../docs/sample-rates/page.md).
+
+Inspect what is applied on the sink:
+
+```bash
+wpctl status   # id for Apollo Solo USB sink
+wpctl inspect ID
+# e.g. api.alsa.period-size, api.alsa.period-num, api.alsa.headroom
+```
+
 ## See also
 
 - `filter-chain/apollo-io-map.conf` — static reference / alternate layout (Thunderbolt-oriented)

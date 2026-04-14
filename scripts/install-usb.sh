@@ -48,7 +48,7 @@ Modes:
   --no-guided-verify  Skip guided Apollo power-cycle + post-reboot handoff.
 
 Environment:
-  OPEN_APOLLO_ASSUME_YES=1   Skip interactive "press Enter" pauses (CI / scripts).
+  OPEN_APOLLO_ASSUME_YES=1   Skip interactive "press Enter" pauses (CI / scripts). Also skips the guided Apollo power-cycle step — omit it if you want that assistant.
   OPEN_APOLLO_SKIP_GUIDED_VERIFY=1   Skip guided power-cycle and post-reboot handoff (same as --no-guided-verify).
 EOF
 }
@@ -1186,9 +1186,12 @@ if command -v pipewire &>/dev/null; then
     mkdir -p "$WP_LUA_DIR" "$WP_JSON_DIR"
     install -m 644 "$PROJECT_DIR/configs/wireplumber/main.lua.d/52-apollo-solo-usb-names.lua" \
         "$WP_LUA_DIR/52-apollo-solo-usb-names.lua"
+    install -m 644 "$PROJECT_DIR/configs/wireplumber/main.lua.d/53-apollo-solo-usb-performance.lua" \
+        "$WP_LUA_DIR/53-apollo-solo-usb-performance.lua"
     install -m 644 "$PROJECT_DIR/configs/wireplumber/wireplumber.conf.d/98-apollo-solo-usb-display.conf" \
         "$WP_JSON_DIR/98-apollo-solo-usb-display.conf"
     chown "$REAL_USER:$REAL_USER" "$WP_LUA_DIR/52-apollo-solo-usb-names.lua" \
+        "$WP_LUA_DIR/53-apollo-solo-usb-performance.lua" \
         "$WP_JSON_DIR/98-apollo-solo-usb-display.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-apollo-solo-usb.conf" 2>/dev/null || true
     rm -f "$WP_LUA_DIR/99-apollo-solo-usb.lua" 2>/dev/null || true
@@ -1211,6 +1214,39 @@ if command -v pipewire &>/dev/null; then
 else
     warn "PipeWire not found — skipping virtual I/O setup"
     info "Audio still works via ALSA (aplay/arecord -D hw:USB)"
+fi
+
+# ================================================================
+# Step 7a: Session tray (USB plug-in status + buffer size menu)
+# ================================================================
+header "Session tray indicator"
+
+TRAY_SCRIPT="$PROJECT_DIR/tools/open-apollo-tray.py"
+ICON_FILE="$PROJECT_DIR/tools/icons/apollo-green.svg"
+TRAY_DESKTOP="$REAL_HOME/.config/autostart/open-apollo-tray.desktop"
+
+if [ -f "$TRAY_SCRIPT" ] && sudo -u "$REAL_USER" -H python3 -c \
+    "import gi; gi.require_version('Gtk','3.0'); gi.require_version('AppIndicator3','0.1')" \
+    2>/dev/null
+then
+    sudo -u "$REAL_USER" mkdir -p "$REAL_HOME/.config/autostart"
+    sudo -u "$REAL_USER" bash -c "cat > \"$TRAY_DESKTOP\"" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Open Apollo
+Comment=Apollo tray: USB status and buffer size
+Exec=python3 $TRAY_SCRIPT
+Icon=$ICON_FILE
+Terminal=false
+Categories=AudioVideo;Audio;
+X-GNOME-Autostart-enabled=true
+X-Open-Apollo-Installer=usb-tray
+EOF
+    chmod 644 "$TRAY_DESKTOP" 2>/dev/null || true
+    chown "$REAL_USER:$REAL_USER" "$TRAY_DESKTOP" 2>/dev/null || true
+    ok "Tray autostart installed — log out/in or run: python3 $TRAY_SCRIPT"
+else
+    info "Tray skipped (optional: gir1.2-appindicator3-0.1 / libappindicator-gtk3)"
 fi
 
 # ================================================================

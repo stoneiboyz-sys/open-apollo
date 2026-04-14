@@ -6,7 +6,12 @@
 #   - /usr/local/lib/ua-usb/ helper library (fx3-load, init scripts)
 #   - /usr/local/bin/ua-usb-init + ua-usb-dsp-init wrappers
 #   - /etc/udev/rules.d/99-apollo-usb.rules
-#   - WirePlumber overrides (~/.config/wireplumber/main.lua.d/99-apollo-solo-usb.lua, legacy .conf)
+#   - WirePlumber overrides (52/53 Lua, 99 legacy, JSON drops)
+#   - User stable stack: apollo-*.service, open-apollo-install-resume.service,
+#     ~/apollo-safe-start.sh, ~/apollo-hotplug-watch.sh
+#   - PipeWire drop-in ~/.config/pipewire/pipewire.conf.d/apollo-solo-usb-io.conf
+#   - ~/.config/open-apollo/ (verify logs, install-resume.json)
+#   - Tray autostart (open-apollo-tray.desktop tagged by install-usb)
 #   - Build cache (~/.cache/open-apollo-snd-usb-build/)
 #   - /tmp install reports and wget logs
 #
@@ -129,6 +134,14 @@ header "Restoring stock snd-usb-audio"
 UNLOAD_FAILED=0
 RELOAD_FAILED=0
 
+# Release /dev/snd users so rmmod/modprobe succeed more reliably.
+if [ -n "${REAL_UID:-}" ] && [ -d "/run/user/$REAL_UID" ]; then
+    sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user stop pipewire pipewire-pulse wireplumber 2>/dev/null || true
+    sleep 1
+fi
+
 if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
     modprobe -r snd_usb_audio 2>/dev/null || rmmod snd_usb_audio 2>/dev/null || true
     if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
@@ -155,13 +168,24 @@ depmod -a 2>/dev/null || true
 # Verify reload with lsmod so the final footer never lies about runtime
 # state (Codex pass 3 found the footer was unconditional before).
 if [ "$UNLOAD_FAILED" = "0" ]; then
-    modprobe snd_usb_audio 2>/dev/null || true
+    if ! modprobe snd_usb_audio 2>/dev/null; then
+        sleep 1
+        modprobe snd_usb_audio 2>/dev/null || true
+    fi
     if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
         STOCK_PATH=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
         ok "Stock snd_usb_audio loaded: $STOCK_PATH"
     else
         RELOAD_FAILED=1
         warn "Stock snd_usb_audio did NOT load after modprobe"
+        info "modprobe -v output (for diagnostics):"
+        modprobe -v snd_usb_audio 2>&1 | sed 's/^/    /' || true
+        if modinfo snd_usb_audio >/dev/null 2>&1; then
+            info "modinfo (summary):"
+            modinfo snd_usb_audio 2>/dev/null | head -10 | sed 's/^/    /' || true
+        else
+            warn "No snd_usb_audio module for this kernel — install your distro's extra kernel modules package (e.g. linux-modules-extra-$(uname -r))."
+        fi
     fi
 fi
 
@@ -189,6 +213,7 @@ header "Removing WirePlumber overrides"
 WP_REMOVED=0
 for WP_CONF in \
     "$REAL_HOME/.config/wireplumber/main.lua.d/52-apollo-solo-usb-names.lua" \
+    "$REAL_HOME/.config/wireplumber/main.lua.d/53-apollo-solo-usb-performance.lua" \
     "$REAL_HOME/.config/wireplumber/main.lua.d/99-apollo-solo-usb.lua" \
     "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/98-apollo-solo-usb-display.conf" \
     "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-apollo-solo-usb.conf"
@@ -200,13 +225,73 @@ do
     fi
 done
 if [ "$WP_REMOVED" = "1" ]; then
+    ok "WirePlumber Open Apollo overrides removed"
+else
+    info "WirePlumber Open Apollo overrides not present"
+fi
+# Always restart session audio (step 4 may have stopped PipeWire to release snd_usb_audio).
+if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+    systemctl --user restart pipewire wireplumber 2>/dev/null; then
+    ok "Restarted PipeWire + WirePlumber"
+else
+    info "Could not restart PipeWire (no session) — log out/in or: systemctl --user restart pipewire wireplumber"
+fi
+
+TRAY_AUTOSTART="$REAL_HOME/.config/autostart/open-apollo-tray.desktop"
+if [ -f "$TRAY_AUTOSTART" ] && grep -q "X-Open-Apollo-Installer=usb-tray" "$TRAY_AUTOSTART" 2>/dev/null; then
+    rm -f "$TRAY_AUTOSTART"
+    ok "Removed Open Apollo tray autostart (install-usb)"
+fi
+
+# ================================================================
+# Step 6b: Stable user services, home scripts, PipeWire Solo USB I/O
+# ================================================================
+header "Removing stable user stack (systemd + home scripts)"
+
+USER_SYSTEMD_DIR="$REAL_HOME/.config/systemd/user"
+PW_CONF_APOLLO="$REAL_HOME/.config/pipewire/pipewire.conf.d/apollo-solo-usb-io.conf"
+OA_CFG_DIR="$REAL_HOME/.config/open-apollo"
+
+if [ -n "${REAL_UID:-}" ] && [ -d "/run/user/$REAL_UID" ]; then
+    for u in open-apollo-install-resume apollo-audio-fix apollo-hotplug-watch; do
+        sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+            systemctl --user disable --now "${u}.service" 2>/dev/null || true
+    done
+    sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user daemon-reload 2>/dev/null || true
+fi
+
+STABLE_REMOVED=0
+for f in \
+    "$USER_SYSTEMD_DIR/open-apollo-install-resume.service" \
+    "$USER_SYSTEMD_DIR/apollo-audio-fix.service" \
+    "$USER_SYSTEMD_DIR/apollo-hotplug-watch.service" \
+    "$REAL_HOME/apollo-safe-start.sh" \
+    "$REAL_HOME/apollo-hotplug-watch.sh" \
+    "$PW_CONF_APOLLO"
+do
+    if [ -f "$f" ]; then
+        rm -f "$f"
+        ok "Removed $f"
+        STABLE_REMOVED=1
+    fi
+done
+if [ -d "$OA_CFG_DIR" ]; then
+    rm -rf "$OA_CFG_DIR"
+    ok "Removed $OA_CFG_DIR"
+    STABLE_REMOVED=1
+fi
+[ "$STABLE_REMOVED" = "0" ] && info "Stable user stack paths not present (already clean)"
+
+if [ -n "${REAL_UID:-}" ] && [ -d "/run/user/$REAL_UID" ]; then
     sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
         systemctl --user restart pipewire wireplumber 2>/dev/null \
-        && ok "Restarted PipeWire + WirePlumber" \
-        || info "Could not restart PipeWire (no session) — restart manually or log out/in"
-else
-    info "WirePlumber Open Apollo overrides not present"
+        && ok "PipeWire restarted after removing Solo USB loopback config" \
+        || info "Could not restart PipeWire (no session)"
 fi
 
 # ================================================================
