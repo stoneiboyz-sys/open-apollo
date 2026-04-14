@@ -161,6 +161,8 @@ for ext in "" ".zst" ".xz"; do
 done
 
 depmod -a 2>/dev/null || true
+# depmod can be slow on busy systems; give the module index a moment to settle.
+sleep 2
 
 # Reload stock only if the earlier unload succeeded.  If the patched
 # module is still in memory, modprobe is a no-op and modinfo's disk-state
@@ -168,21 +170,36 @@ depmod -a 2>/dev/null || true
 # Verify reload with lsmod so the final footer never lies about runtime
 # state (Codex pass 3 found the footer was unconditional before).
 if [ "$UNLOAD_FAILED" = "0" ]; then
-    if ! modprobe snd_usb_audio 2>/dev/null; then
-        sleep 1
+    for _try in 1 2 3 4 5; do
+        if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
+            break
+        fi
         modprobe snd_usb_audio 2>/dev/null || true
-    fi
+        sleep 1
+    done
     if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
         STOCK_PATH=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
         ok "Stock snd_usb_audio loaded: $STOCK_PATH"
     else
         RELOAD_FAILED=1
-        warn "Stock snd_usb_audio did NOT load after modprobe"
-        info "modprobe -v output (for diagnostics):"
-        modprobe -v snd_usb_audio 2>&1 | sed 's/^/    /' || true
-        if modinfo snd_usb_audio >/dev/null 2>&1; then
+        warn "Stock snd_usb_audio did NOT load after repeated modprobe"
+        _mp_out=$(modprobe -v snd_usb_audio 2>&1) || true
+        if [ -n "$_mp_out" ]; then
+            info "modprobe -v (diagnostics):"
+            printf '%s\n' "$_mp_out" | while IFS= read -r _line || [ -n "$_line" ]; do
+                info "    $_line"
+            done
+        fi
+        # Verbose attempt sometimes succeeds when silent modprobe races depmod.
+        if lsmod 2>/dev/null | grep -q '^snd_usb_audio'; then
+            RELOAD_FAILED=0
+            STOCK_PATH=$(modinfo snd_usb_audio 2>/dev/null | awk '/^filename:/ {print $2}')
+            ok "Stock snd_usb_audio loaded after diagnostic modprobe: $STOCK_PATH"
+        elif modinfo snd_usb_audio >/dev/null 2>&1; then
             info "modinfo (summary):"
-            modinfo snd_usb_audio 2>/dev/null | head -10 | sed 's/^/    /' || true
+            modinfo snd_usb_audio 2>/dev/null | head -10 | while IFS= read -r _line || [ -n "$_line" ]; do
+                info "    $_line"
+            done
         else
             warn "No snd_usb_audio module for this kernel — install your distro's extra kernel modules package (e.g. linux-modules-extra-$(uname -r))."
         fi
