@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parse USBPcap captures and extract Apollo Solo USB DSP bulk commands.
 
-Reads .pcap files from USBPcap (Windows) and extracts:
+Reads classic .pcap or .pcapng (Wireshark) from USBPcap (Windows) and extracts:
   - Bulk OUT commands (EP1 OUT, 0xDC magic) — host → device writes
   - Bulk IN responses (EP1 IN, 0xDD magic) — device → host responses
   - Optionally correlates with mixer-sweep.py CSV timestamps
@@ -46,6 +46,20 @@ USBPCAP_HEADER_LEN = 27
 # Apollo DSP protocol constants
 MAGIC_CMD = 0xDC
 MAGIC_RSP = 0xDD
+
+# Mic→monitor routing bulk (tools/usb-full-init.py) — for pcap comparison
+PKT_MIC_MONITOR_A = bytes([
+    0x04, 0x00, 0x25, 0xDC, 0x04, 0x00, 0x0C, 0x00, 0xA8, 0x6B, 0x0C, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x19,
+])
+PKT_MIC_MONITOR_B = bytes([
+    0x04, 0x00, 0x26, 0xDC, 0x04, 0x00, 0x0C, 0x00, 0xC4, 0x6A, 0x0C, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x1A, 0x00, 0x00, 0x04,
+])
+
+# Substrings for mic→monitor-style DSP headers (any bulk OUT / any EP)
+SEARCH_PAT_25DC = bytes([0x04, 0x00, 0x25, 0xDC])
+SEARCH_PAT_26DC = bytes([0x04, 0x00, 0x26, 0xDC])
 OP_QUERY = 0x0001
 OP_READWRITE = 0x0002
 OP_BLOCK_WRITE = 0x0004
@@ -97,8 +111,35 @@ class SweepEntry:
     value: str
 
 
+def _parse_usbpcap_record(pkt_data, timestamp):
+    """Parse one USBPcap link-layer record into UsbPacket or None."""
+    if len(pkt_data) < 28:
+        return None
+
+    hdr_len = struct.unpack_from("<H", pkt_data, 0)[0]
+    if hdr_len < 27 or hdr_len > len(pkt_data):
+        return None
+
+    irp_id = struct.unpack_from("<Q", pkt_data, 2)[0]
+    irp_info = pkt_data[16]  # 0=OUT, 1=IN
+    endpoint = pkt_data[21]
+    transfer_type = pkt_data[22]
+
+    direction = "IN" if irp_info & 1 else "OUT"
+    payload = pkt_data[hdr_len:]
+
+    return UsbPacket(
+        timestamp=timestamp,
+        direction=direction,
+        endpoint=endpoint & 0x7F,
+        transfer_type=transfer_type,
+        data=payload,
+        irp_id=irp_id,
+    )
+
+
 def read_pcap(filepath):
-    """Read pcap file and yield UsbPacket objects.
+    """Read classic pcap (not pcapng) and return UsbPacket list.
 
     Supports standard pcap format with USBPcap link type (249).
     """
@@ -134,32 +175,58 @@ def read_pcap(filepath):
             if len(pkt_data) < incl_len:
                 break
 
-            # Parse USBPcap pseudo-header
-            if len(pkt_data) < USBPCAP_HEADER_LEN:
+            pkt = _parse_usbpcap_record(pkt_data, timestamp)
+            if pkt:
+                packets.append(pkt)
+
+        return packets
+
+
+PCAPNG_SHB = 0x0A0D0D0A
+PCAPNG_EPB = 0x00000006
+
+
+def read_pcapng(filepath):
+    """Read pcapng (Wireshark) with Enhanced Packet Blocks; link 249 = USBPcap."""
+    packets = []
+    with open(filepath, "rb") as f:
+        while True:
+            hdr = f.read(8)
+            if len(hdr) < 8:
+                break
+            block_type, block_len = struct.unpack("<II", hdr)
+            if block_len < 12:
+                break
+            body = f.read(block_len - 8)
+            if len(body) != block_len - 8:
+                break
+
+            if block_type != PCAPNG_EPB:
+                continue
+            if len(body) < 20:
                 continue
 
-            hdr_len = struct.unpack_from("<H", pkt_data, 0)[0]
-            if hdr_len < 27 or hdr_len > len(pkt_data):
-                continue
+            iface, tsh, tsl, caplen, pktlen = struct.unpack_from("<IIIII", body, 0)
+            ts_ns = (tsh << 32) | tsl
+            timestamp = ts_ns / 1e9
 
-            irp_id = struct.unpack_from("<Q", pkt_data, 2)[0]
-            irp_info = pkt_data[16]  # 0=OUT, 1=IN
-            endpoint = pkt_data[21]
-            transfer_type = pkt_data[22]
-
-            direction = "IN" if irp_info & 1 else "OUT"
-            payload = pkt_data[hdr_len:]
-
-            packets.append(UsbPacket(
-                timestamp=timestamp,
-                direction=direction,
-                endpoint=endpoint & 0x7F,  # strip direction bit
-                transfer_type=transfer_type,
-                data=payload,
-                irp_id=irp_id,
-            ))
+            capdata = body[20 : 20 + caplen]
+            pkt = _parse_usbpcap_record(capdata, timestamp)
+            if pkt:
+                packets.append(pkt)
 
     return packets
+
+
+def read_pcap_auto(filepath):
+    """Detect pcap vs pcapng and read USBPcap packets."""
+    with open(filepath, "rb") as f:
+        magic = f.read(4)
+    if len(magic) < 4:
+        raise ValueError("Empty file")
+    if struct.unpack("<I", magic)[0] == PCAPNG_SHB:
+        return read_pcapng(filepath)
+    return read_pcap(filepath)
 
 
 def decode_dsp_packet(pkt):
@@ -328,7 +395,7 @@ def print_commands(dsp_cmds, limit=None):
 def main():
     parser = argparse.ArgumentParser(
         description="Decode Apollo USB DSP commands from USBPcap pcap files")
-    parser.add_argument("pcap", help="USBPcap .pcap file")
+    parser.add_argument("pcap", help="USBPcap .pcap or .pcapng file")
     parser.add_argument("--sweep-log", type=str, default=None,
                         help="Sweep CSV log for correlation")
     parser.add_argument("--after", type=float, default=None,
@@ -343,10 +410,34 @@ def main():
                         help="Limit output to N commands")
     parser.add_argument("--out-only", action="store_true",
                         help="Show only OUT (host→device) commands")
+    parser.add_argument(
+        "--dump-raw-bulk-out",
+        action="store_true",
+        help="Print timestamp + raw hex for each BULK transfer_type OUT on "
+        "--endpoint (includes non-DSP payloads).",
+    )
+    parser.add_argument(
+        "--search-mic-pkts",
+        action="store_true",
+        help="Search PKT_MIC_MONITOR_A/B on any BULK OUT endpoint and print hits.",
+    )
+    parser.add_argument(
+        "--search-dc-patterns",
+        action="store_true",
+        help="Search any BULK OUT for payload containing 040025dc or 040026dc; "
+        "print ep + raw hex (respects --after / --before).",
+    )
     args = parser.parse_args()
 
+    def _aux_modes():
+        return (
+            args.dump_raw_bulk_out
+            or args.search_mic_pkts
+            or args.search_dc_patterns
+        )
+
     print(f"Reading {args.pcap}...")
-    packets = read_pcap(args.pcap)
+    packets = read_pcap_auto(args.pcap)
     print(f"  {len(packets)} USB packets total")
 
     # Filter to bulk endpoint
@@ -374,8 +465,81 @@ def main():
     in_count = sum(1 for c in dsp_cmds if c.direction == "IN")
     print(f"  {len(dsp_cmds)} DSP commands ({out_count} OUT, {in_count} IN)")
 
+    if args.dump_raw_bulk_out:
+        print("\n=== Raw BULK OUT (filtered endpoint + time window) ===")
+        for p in bulk_pkts:
+            if p.direction == "OUT" and len(p.data) > 0:
+                note = ""
+                if p.data == PKT_MIC_MONITOR_A:
+                    note = "  # MATCH usb-full-init pkt_a (mic→monitor)"
+                elif p.data == PKT_MIC_MONITOR_B:
+                    note = "  # MATCH usb-full-init pkt_b (mic→monitor)"
+                print(
+                    f"  {p.timestamp:.9f}  ep={p.endpoint}  len={len(p.data)}  "
+                    f"hex={p.data.hex()}{note}",
+                )
+
+    if args.search_mic_pkts:
+        print("\n=== Search pkt_a / pkt_b on any BULK OUT ===")
+        hits = 0
+        for p in packets:
+            if p.transfer_type != 3 or p.direction != "OUT" or len(p.data) == 0:
+                continue
+            if p.data == PKT_MIC_MONITOR_A:
+                print(
+                    f"  HIT_A  {p.timestamp:.9f}  ep={p.endpoint}  "
+                    f"len={len(p.data)}  hex={p.data.hex()}",
+                )
+                hits += 1
+            elif p.data == PKT_MIC_MONITOR_B:
+                print(
+                    f"  HIT_B  {p.timestamp:.9f}  ep={p.endpoint}  "
+                    f"len={len(p.data)}  hex={p.data.hex()}",
+                )
+                hits += 1
+        if hits == 0:
+            print("  (no exact matches for pkt_a or pkt_b on any BULK OUT)")
+
+    if args.search_dc_patterns:
+        print(
+            "\n=== BULK OUT containing 040025dc or 040026dc "
+            "(any endpoint, --after/--before apply) ===",
+        )
+        hits_dc = 0
+        for p in packets:
+            if args.after is not None and p.timestamp < args.after:
+                continue
+            if args.before is not None and p.timestamp > args.before:
+                continue
+            if p.transfer_type != 3 or p.direction != "OUT" or len(p.data) == 0:
+                continue
+            tags = []
+            if SEARCH_PAT_25DC in p.data:
+                tags.append("040025dc")
+            if SEARCH_PAT_26DC in p.data:
+                tags.append("040026dc")
+            if not tags:
+                continue
+            hits_dc += 1
+            tag_s = "+".join(tags)
+            print(
+                f"  match={tag_s}  {p.timestamp:.9f}  ep={p.endpoint}  "
+                f"len={len(p.data)}  hex={p.data.hex()}",
+            )
+        if hits_dc == 0:
+            print("  (no bulk OUT payloads contain those substrings)")
+
     if not dsp_cmds:
         print("No DSP commands found.")
+        if not _aux_modes():
+            print(
+                "Tip: try --dump-raw-bulk-out, --search-mic-pkts, or "
+                "--search-dc-patterns for raw payloads.",
+            )
+        if not _aux_modes():
+            return
+        if args.sweep_log:
+            print("Skipping sweep correlation (no DSP commands).")
         return
 
     # Collect unique params seen in OUT commands
