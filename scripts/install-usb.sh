@@ -150,6 +150,7 @@ print_stable_finish_guide() {
     echo -e "${BOLD}   Useful commands${NC}"
     echo -e "   ${DIM}•${NC} Preamp / 48V: ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
     echo -e "   ${DIM}•${NC} If routing lags: ${CYAN}~/apollo-safe-start.sh${NC}"
+    echo -e "   ${DIM}•${NC} Tray autostart (no terminal): ${CYAN}bash $PROJECT_DIR/scripts/install-open-apollo-tray-autostart.sh${NC}"
     echo ""
     echo -e "${DIM}   Tip: OPEN_APOLLO_ASSUME_YES=1 skips the \"press Enter\" prompts.${NC}"
     echo ""
@@ -1221,32 +1222,15 @@ fi
 # ================================================================
 header "Session tray indicator"
 
-TRAY_SCRIPT="$PROJECT_DIR/tools/open-apollo-tray.py"
-ICON_FILE="$PROJECT_DIR/tools/icons/apollo-green.svg"
-TRAY_DESKTOP="$REAL_HOME/.config/autostart/open-apollo-tray.desktop"
-
-if [ -f "$TRAY_SCRIPT" ] && sudo -u "$REAL_USER" -H python3 -c \
-    "import gi; gi.require_version('Gtk','3.0'); gi.require_version('AppIndicator3','0.1')" \
-    2>/dev/null
+TRAY_INSTALLER="$PROJECT_DIR/scripts/install-open-apollo-tray-autostart.sh"
+if [ -f "$TRAY_INSTALLER" ] && sudo -u "$REAL_USER" -H \
+    HOME="$REAL_HOME" \
+    bash "$TRAY_INSTALLER" 2>/dev/null
 then
-    sudo -u "$REAL_USER" mkdir -p "$REAL_HOME/.config/autostart"
-    sudo -u "$REAL_USER" bash -c "cat > \"$TRAY_DESKTOP\"" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Open Apollo
-Comment=Apollo tray: USB status and buffer size
-Exec=python3 $TRAY_SCRIPT
-Icon=$ICON_FILE
-Terminal=false
-Categories=AudioVideo;Audio;
-X-GNOME-Autostart-enabled=true
-X-Open-Apollo-Installer=usb-tray
-EOF
-    chmod 644 "$TRAY_DESKTOP" 2>/dev/null || true
-    chown "$REAL_USER:$REAL_USER" "$TRAY_DESKTOP" 2>/dev/null || true
-    ok "Tray autostart installed — log out/in or run: python3 $TRAY_SCRIPT"
+    ok "Tray autostart installed — log out/in (or reboot) to start without a terminal"
 else
-    info "Tray skipped (optional: gir1.2-appindicator3-0.1 / libappindicator-gtk3)"
+    info "Tray autostart skipped (install gir1.2-appindicator3-0.1 then run as your user):"
+    info "  bash $TRAY_INSTALLER"
 fi
 
 # ================================================================

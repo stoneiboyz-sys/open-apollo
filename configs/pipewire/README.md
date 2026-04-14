@@ -46,7 +46,7 @@ Restart WirePlumber after editing. If names do not change, check `journalctl --u
 
 `systemctl --user restart wireplumber pipewire`
 
-Defaults: `period-size` 512, `period-num` 64, `headroom` 512. Smaller `PERIOD_SIZE` → lower latency, more risk of underruns; larger → the opposite. After `install-usb.sh`, the session tray (`tools/open-apollo-tray.py`, autostart when AppIndicator is installed) can change the USB period from the menu without editing this file by hand.
+Defaults: `period-size` 512, `period-num` 64, `headroom` 512. Smaller `PERIOD_SIZE` → lower latency, more risk of underruns; larger → the opposite. After `install-usb.sh`, the session tray (`tools/open-apollo-tray.py`) can change the USB period from the menu. Autostart is registered when AppIndicator is present at install time; if you installed `gir1.2-appindicator3-0.1` later, run **`bash scripts/install-open-apollo-tray-autostart.sh`** as your user (no sudo), then log out/in.
 
 **Graph quantum** (PipeWire-wide processing buffer, not the same as ALSA period) lives in `~/.config/pipewire/pipewire.conf.d/*.conf` via `default.clock.*` — see [PipeWire clock docs](https://docs.pipewire.org/page_daemon_conf.html). Sample-rate notes (mostly Thunderbolt) are in [sample-rates](../docs/sample-rates/page.md).
 
