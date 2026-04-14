@@ -5,8 +5,9 @@ Replays the complete 38-packet bulk init sequence captured from Windows
 UA Console, then sets the UAC2 clock and initial monitor level.
 This configures the FPGA routing matrix so capture channels receive signal.
 
-Logs to stdout when connected to a TTY; otherwise to syslog (SysLogHandler
-ident ua-usb-dsp-init) so udev can run without a blocking pipe to logger(1).
+Logs to stdout when connected to a TTY; otherwise to syslog via
+SysLogHandler(/dev/log, LOG_USER) with messages prefixed ``ua-usb-dsp-init:``
+in the formatter (no ident= kwarg — portable across Python builds).
 
 Usage:
   sudo python3 tools/usb-full-init.py
@@ -60,23 +61,23 @@ def configure_logging():
     LOG.setLevel(logging.INFO)
     LOG.handlers.clear()
     LOG.propagate = False
-    fmt = logging.Formatter("%(message)s")
+    fmt_tty = logging.Formatter("%(message)s")
+    fmt_syslog = logging.Formatter(_SYSLOG_IDENT + " %(message)s")
     if sys.stdout.isatty():
         h = logging.StreamHandler(sys.stdout)
-        h.setFormatter(fmt)
+        h.setFormatter(fmt_tty)
         LOG.addHandler(h)
     else:
         try:
             h = logging.handlers.SysLogHandler(
                 address="/dev/log",
                 facility=logging.handlers.SysLogHandler.LOG_USER,
-                ident=_SYSLOG_IDENT,
             )
-            h.setFormatter(fmt)
+            h.setFormatter(fmt_syslog)
             LOG.addHandler(h)
         except OSError:
             h = logging.StreamHandler(sys.stderr)
-            h.setFormatter(fmt)
+            h.setFormatter(fmt_syslog)
             LOG.addHandler(h)
 
 
@@ -167,7 +168,7 @@ def replay_init_sequence(dev, bin_path):
             # Phase transition delay — let DSP finish processing programs
             if i == ROUTING_START:
                 LOG.info("  -- waiting for DSP to process program loads --")
-                time.sleep(2.0)
+                time.sleep(5.0)
 
             # All packets get generous timeout (AMD xHCI can be slow)
             timeout = 10000
