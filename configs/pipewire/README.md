@@ -29,6 +29,10 @@ Scope and priority (**base vs DSP**) are documented in the root [README.md](../.
 
 Regenerated on each successful run — **do not edit by hand**; fix the generator scripts instead.
 
+## Display names (USB, Plasma / pavucontrol)
+
+Friendly labels for the raw ALSA nodes (**Apollo Solo USB** instead of “Analog Surround 2.1”) come from WirePlumber: `configs/wireplumber/50-apollo-solo-usb.conf` (installed to `~/.config/wireplumber/wireplumber.conf.d/` by `install-usb.sh`). Restart WirePlumber after changing it.
+
 ## See also
 
 - `filter-chain/apollo-io-map.conf` — static reference / alternate layout (Thunderbolt-oriented)

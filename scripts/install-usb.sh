@@ -1183,42 +1183,8 @@ if command -v pipewire &>/dev/null; then
     # WirePlumber rule for pro-audio profile
     WP_CONF_DIR="$REAL_HOME/.config/wireplumber/wireplumber.conf.d"
     mkdir -p "$WP_CONF_DIR"
-    cat > "$WP_CONF_DIR/50-apollo-solo-usb.conf" << 'WPEOF'
-monitor.alsa.rules = [
-    {
-        matches = [
-            { node.name = "~alsa_input.*Apollo_Solo_USB*" }
-        ]
-        actions = {
-            update-props = {
-                session.suspend-timeout-seconds = 0
-                node.pause-on-idle = false
-            }
-        }
-    }
-    {
-        matches = [
-            { node.name = "~alsa_output.*Apollo_Solo_USB*" }
-        ]
-        actions = {
-            update-props = {
-                session.suspend-timeout-seconds = 0
-                node.pause-on-idle = false
-            }
-        }
-    }
-    {
-        matches = [
-            { device.name = "~alsa_card.*Apollo_Solo_USB*" }
-        ]
-        actions = {
-            update-props = {
-                device.profile = "output:analog-surround-21+input:analog-surround-21"
-            }
-        }
-    }
-]
-WPEOF
+    install -m 644 "$PROJECT_DIR/configs/wireplumber/50-apollo-solo-usb.conf" \
+        "$WP_CONF_DIR/50-apollo-solo-usb.conf"
     chown -R "$REAL_USER":"$REAL_USER" "$WP_CONF_DIR" 2>/dev/null || true
 
     # Restart PipeWire so it discovers the new ALSA card, then run setup
