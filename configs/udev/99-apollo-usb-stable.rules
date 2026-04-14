@@ -1,0 +1,22 @@
+# Universal Audio Apollo USB — stable mode (firmware loader only)
+# This rule uploads firmware on hotplug and runs a lightweight post-firmware
+# helper (vendor monitor pass + snd_usb_audio modprobe), but no full DSP replay.
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000c", \
+  RUN+="/usr/local/bin/ua-usb-init %k ApolloSolo.bin"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="0001", \
+  RUN+="/usr/local/bin/ua-usb-init %k ApolloTwin.bin"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000e", \
+  RUN+="/usr/local/bin/ua-usb-init %k ApolloTwinX.bin"
+
+# Post-firmware live devices: lightweight stable recovery only.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000d", \
+  RUN+="/usr/local/bin/ua-usb-post-firmware-stable"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="0002", \
+  RUN+="/usr/local/bin/ua-usb-post-firmware-stable"
+
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2b5a", ATTR{idProduct}=="000f", \
+  RUN+="/usr/local/bin/ua-usb-post-firmware-stable"

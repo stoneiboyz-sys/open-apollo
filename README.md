@@ -213,7 +213,72 @@ cd open-apollo
 sudo bash scripts/install-usb.sh
 ```
 
+Optional install mode flags:
+
+```bash
+# Recommended default (stable startup/hotplug behavior)
+sudo bash scripts/install-usb.sh --stable-default
+
+# Legacy behavior (full DSP auto-init via udev)
+sudo bash scripts/install-usb.sh --legacy-dsp
+```
+
 The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
+
+### USB Stable Mode (Recommended)
+
+If your system is sensitive to full DSP replay timeouts or startup crackle, use the
+stable userspace recovery flow:
+
+1. Keep the heavy udev DSP replay script disabled (`ua-usb-dsp-init.disabled`).
+2. Use vendor-only monitor recovery + PipeWire sink auto-fix via user services.
+
+Install the stable user services:
+
+```bash
+cd open-apollo
+bash scripts/install-apollo-safe-user.sh
+```
+
+What this enables:
+
+- `apollo-safe-start.sh` — vendor-only monitor restore (`--vendor-monitor-hp-only`), ensures `snd_usb_audio` is loaded, restarts PipeWire/WirePlumber, and selects Apollo sink.
+- `apollo-audio-fix.service` — runs once at login.
+- `apollo-hotplug-watch.service` — reruns the fix when sound devices hotplug/change.
+- `ua-usb-post-firmware-stable` (udev root helper) — runs automatically on live Apollo USB enumeration to apply lightweight post-firmware recovery without full DSP replay.
+
+Disable later if needed:
+
+```bash
+systemctl --user disable --now apollo-hotplug-watch.service apollo-audio-fix.service
+```
+
+### USB Stable Mode Validation (2-Min)
+
+Run this quick checklist after install:
+
+1. Reboot Linux with Apollo powered on.
+2. Confirm both services are active:
+   ```bash
+   systemctl --user status apollo-audio-fix.service apollo-hotplug-watch.service --no-pager
+   ```
+3. Confirm Apollo sink is default:
+   ```bash
+   pactl get-default-sink
+   pactl list short sinks
+   ```
+4. Play system audio and verify output in Apollo headphones/monitors.
+5. Test mic direct monitor and capture:
+   ```bash
+   arecord -D plughw:USB -f S32_LE -r 48000 -c 2 -d 3 /tmp/apollo-test.wav
+   ```
+6. Hotplug test: unplug/replug Apollo USB and wait ~5-10s; verify system audio auto-recovers without manual commands.
+
+If sink is not selected after reboot/hotplug, run:
+
+```bash
+~/apollo-safe-start.sh
+```
 
 After install, the following PipeWire devices are available:
 
