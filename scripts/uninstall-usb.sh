@@ -6,7 +6,7 @@
 #   - /usr/local/lib/ua-usb/ helper library (fx3-load, init scripts)
 #   - /usr/local/bin/ua-usb-init + ua-usb-dsp-init wrappers
 #   - /etc/udev/rules.d/99-apollo-usb.rules
-#   - WirePlumber override (~/.config/wireplumber/.../50-apollo-solo-usb.conf)
+#   - WirePlumber overrides (~/.config/wireplumber/main.lua.d/99-apollo-solo-usb.lua, legacy .conf)
 #   - Build cache (~/.cache/open-apollo-snd-usb-build/)
 #   - /tmp install reports and wget logs
 #
@@ -184,22 +184,27 @@ done
 # ================================================================
 # Step 6: Remove WirePlumber override + restart PipeWire
 # ================================================================
-header "Removing WirePlumber override"
+header "Removing WirePlumber overrides"
 
-WP_CONF="$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-apollo-solo-usb.conf"
-if [ -f "$WP_CONF" ]; then
-    rm -f "$WP_CONF"
-    ok "Removed $WP_CONF"
-
-    # Restart PipeWire so WirePlumber drops the cached rule.
-    # Best-effort — no dbus session in non-interactive contexts is fine.
+WP_REMOVED=0
+for WP_CONF in \
+    "$REAL_HOME/.config/wireplumber/main.lua.d/99-apollo-solo-usb.lua" \
+    "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-apollo-solo-usb.conf"
+do
+    if [ -f "$WP_CONF" ]; then
+        rm -f "$WP_CONF"
+        ok "Removed $WP_CONF"
+        WP_REMOVED=1
+    fi
+done
+if [ "$WP_REMOVED" = "1" ]; then
     sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
         systemctl --user restart pipewire wireplumber 2>/dev/null \
         && ok "Restarted PipeWire + WirePlumber" \
         || info "Could not restart PipeWire (no session) — restart manually or log out/in"
 else
-    info "WirePlumber override not present"
+    info "WirePlumber Open Apollo overrides not present"
 fi
 
 # ================================================================

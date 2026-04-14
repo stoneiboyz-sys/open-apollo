@@ -1180,12 +1180,14 @@ header "PipeWire Configuration"
 if command -v pipewire &>/dev/null; then
     info "Setting up PipeWire virtual I/O devices..."
 
-    # WirePlumber rule for pro-audio profile
-    WP_CONF_DIR="$REAL_HOME/.config/wireplumber/wireplumber.conf.d"
-    mkdir -p "$WP_CONF_DIR"
-    install -m 644 "$PROJECT_DIR/configs/wireplumber/50-apollo-solo-usb.conf" \
-        "$WP_CONF_DIR/50-apollo-solo-usb.conf"
-    chown -R "$REAL_USER":"$REAL_USER" "$WP_CONF_DIR" 2>/dev/null || true
+    # WirePlumber: Lua rules in main.lua.d (alsa_monitor.rules). JSON in
+    # wireplumber.conf.d is not applied for ALSA on modern WirePlumber.
+    WP_LUA_DIR="$REAL_HOME/.config/wireplumber/main.lua.d"
+    mkdir -p "$WP_LUA_DIR"
+    install -m 644 "$PROJECT_DIR/configs/wireplumber/main.lua.d/99-apollo-solo-usb.lua" \
+        "$WP_LUA_DIR/99-apollo-solo-usb.lua"
+    chown "$REAL_USER:$REAL_USER" "$WP_LUA_DIR/99-apollo-solo-usb.lua" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-apollo-solo-usb.conf" 2>/dev/null || true
 
     # Restart PipeWire so it discovers the new ALSA card, then run setup
     info "Restarting PipeWire to detect Apollo..."
