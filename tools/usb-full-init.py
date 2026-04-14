@@ -56,6 +56,21 @@ if not os.path.exists(INIT_BIN):
     INIT_BIN = os.path.join(_script_dir, "init-bulk-sequence.bin")
 
 
+def _drain_bulk_in_until_idle(dev, timeout_ms):
+    """Drain EP BULK IN until two consecutive read timeouts (endpoint idle).
+
+    Avoids stopping early when the DSP pauses longer than *timeout_ms* between
+    IN chunks (single-timeout drain can leave stale data).
+    """
+    consecutive_timeouts = 0
+    while consecutive_timeouts < 2:
+        try:
+            dev.read(EP_BULK_IN, 1024, timeout=timeout_ms)
+            consecutive_timeouts = 0
+        except usb.core.USBTimeoutError:
+            consecutive_timeouts += 1
+
+
 def configure_logging():
     """TTY → stdout; else syslog (non-blocking vs pipe-to-logger)."""
     LOG.setLevel(logging.INFO)
@@ -195,21 +210,13 @@ def replay_init_sequence(dev, bin_path):
                     )
                     time.sleep(wait)
                     # Drain any stale responses before retry
-                    try:
-                        while True:
-                            dev.read(EP_BULK_IN, 1024, timeout=100)
-                    except usb.core.USBTimeoutError:
-                        pass
+                    _drain_bulk_in_until_idle(dev, 100)
 
             LOG.info("  [%2d] type=%3d words=%3d len=%s", i, cmd_type, wc, pkt_len)
 
             # Drain responses — wait longer after big packets
             drain_timeout = 1000 if pkt_len > 512 else 500
-            try:
-                while True:
-                    dev.read(EP_BULK_IN, 1024, timeout=drain_timeout)
-            except usb.core.USBTimeoutError:
-                pass
+            _drain_bulk_in_until_idle(dev, drain_timeout)
 
     LOG.info("  Sent all %s packets", count)
 
@@ -229,11 +236,29 @@ def run_full_dsp_init(dev):
     replay_init_sequence(dev, INIT_BIN)
 
     LOG.info("Writing mic->monitor routing...")
-    pkt_a = bytes([0x04, 0x00, 0x25, 0xdc, 0x04, 0x00, 0x0c, 0x00, 0xa8, 0x6b, 0x0c, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x19])
-    pkt_b = bytes([0x04, 0x00, 0x26, 0xdc, 0x04, 0x00, 0x0c, 0x00, 0xc4, 0x6a, 0x0c, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x04])
+    pkt_a = bytes([0x04, 0x00, 0x25, 0xdc, 0x04, 0x00, 0x1d, 0x00, 0x19, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00])
+    pkt_b = bytes([0x08, 0x00, 0x26, 0xdc, 0x04, 0x00, 0x1d, 0x00, 0x18, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x1d, 0x00, 0x18, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00])
     dev.write(EP_BULK_OUT, pkt_a, timeout=1000)
     dev.write(EP_BULK_OUT, pkt_b, timeout=1000)
-    LOG.info("Mic->monitor routing: done")
+    # Extra DSP OUT from monitor-toggle.pcapng (not in init-bulk-sequence.bin); UA sends
+    # these after routing; float words in pkt_toggle_3 match the capture (gain).
+    pkt_toggle_1 = bytes.fromhex(
+        "08002fdc04001d0000000000000000000000000004001d00000000000000000100000000"
+    )
+    pkt_toggle_2 = bytes.fromhex(
+        "100030dc04001d0000000000030000000000000004001d00000000000300000100000000"
+        "04001d0000000000040000000000000004001d00000000000400000100000000"
+    )
+    pkt_toggle_3 = bytes.fromhex(
+        "180031dc04001d000000000000000000d63c263f04001d000000000000000001d63c263f"
+        "04001d0000000000030000000000000004001d00000000000300000100000000"
+        "04001d0000000000040000000000000004001d00000000000400000100000000"
+    )
+    dev.write(EP_BULK_OUT, pkt_toggle_1, timeout=1000)
+    dev.write(EP_BULK_OUT, pkt_toggle_2, timeout=1000)
+    time.sleep(0.006)
+    dev.write(EP_BULK_OUT, pkt_toggle_3, timeout=1000)
+    LOG.info("Mic->monitor routing + monitor-toggle DSP burst: done")
 
     dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
                       struct.pack("<I", 48000), timeout=2000)
