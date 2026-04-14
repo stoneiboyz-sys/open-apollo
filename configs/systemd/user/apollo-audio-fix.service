@@ -1,0 +1,11 @@
+[Unit]
+Description=Set Apollo as default PipeWire sink
+After=pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/apollo-safe-start.sh
+
+[Install]
+WantedBy=default.target

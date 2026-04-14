@@ -5,7 +5,7 @@
 # DSP init, PipeWire config, audio test.
 #
 # Usage:
-#   sudo bash scripts/install-usb.sh
+#   sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp]
 #
 # Requires: Apollo USB plugged in, USB 3.0 port
 
@@ -18,6 +18,39 @@ REPORT_FILE="/tmp/open-apollo-usb-install-report.json"
 TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
 VERSION="0.1.0"
 SOURCE="${OPEN_APOLLO_SOURCE:-user}"
+INSTALL_MODE="stable"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--help]
+
+Modes:
+  --stable-default  Recommended. Firmware-only udev + user auto-recovery services.
+  --legacy-dsp      Restores legacy full-DSP udev auto-init behavior.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --stable-default)
+            INSTALL_MODE="stable"
+            ;;
+        --legacy-dsp)
+            INSTALL_MODE="legacy"
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            fail "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -86,6 +119,11 @@ esac
 
 ok "Distro: ${DISTRO:-unknown}"
 info "Kernel: $KERNEL | Arch: $ARCH"
+if [ "$INSTALL_MODE" = "legacy" ]; then
+    warn "Install mode: legacy DSP (full DSP auto-init via udev)"
+else
+    ok "Install mode: stable default (recommended)"
+fi
 
 # Snapshot pre-existing install state before we change anything.  The
 # fail-closed exit paths use these to produce state-honest messages —
@@ -98,7 +136,7 @@ PREEXISTING_HELPERS=0
 [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ] && PREEXISTING_KO=1
 [ -f "/etc/udev/rules.d/99-apollo-usb.rules" ] && PREEXISTING_UDEV=1
 [ -d "/usr/local/lib/ua-usb" ] && [ -x "/usr/local/bin/ua-usb-init" ] \
-    && [ -x "/usr/local/bin/ua-usb-dsp-init" ] && PREEXISTING_HELPERS=1
+    && PREEXISTING_HELPERS=1
 
 # ================================================================
 # Step 2: Check for Apollo USB device
@@ -601,14 +639,19 @@ fi
 
 ok "snd_usb_audio unloaded cleanly — safe to proceed"
 
-# Step B: Run full DSP init (38 packets including DSP program load for capture)
+# Step B: Initial DSP stage
 if lsusb 2>/dev/null | grep -qi "2b5a:000d\|2b5a:0002\|2b5a:000f"; then
-    info "Running full DSP init (FPGA + routing + DSP program + monitor)..."
-    if run_sudo python3 "$PROJECT_DIR/tools/usb-full-init.py" 2>&1 | tail -5; then
-        ok "DSP initialized"
+    if [ "$INSTALL_MODE" = "legacy" ]; then
+        info "Running full DSP init (FPGA + routing + DSP program + monitor)..."
+        if run_sudo python3 "$PROJECT_DIR/tools/usb-full-init.py" 2>&1 | tail -5; then
+            ok "DSP initialized"
+        else
+            warn "Full DSP init failed — trying lightweight init..."
+            run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" 2>&1 | tail -5 || true
+        fi
     else
-        warn "Full DSP init failed — trying lightweight init..."
-        run_sudo python3 "$PROJECT_DIR/tools/usb-dsp-init.py" 2>&1 | tail -5 || true
+        info "Stable mode: skipping DSP init during installer run."
+        info "Firmware/driver setup continues; user services handle sink recovery."
     fi
     sleep 1
 fi
@@ -646,7 +689,7 @@ if [ -f "/lib/modules/$KERNEL/updates/snd-usb-audio.ko" ]; then
 fi
 
 # ================================================================
-# Step 6b: Install udev rules + init scripts for auto-init on reboot
+# Step 6b: Install udev rules + helper scripts (stable mode default)
 # ================================================================
 header "Installing Auto-Init (udev)"
 
@@ -654,20 +697,42 @@ UA_USB_LIB="/usr/local/lib/ua-usb"
 UA_USB_BIN="/usr/local/bin"
 UDEV_DIR="/etc/udev/rules.d"
 
-info "Installing firmware loader and DSP init scripts..."
+info "Installing firmware loader and helper scripts..."
 run_sudo mkdir -p "$UA_USB_LIB"
 run_sudo cp "$PROJECT_DIR/tools/fx3-load.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-full-init.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-dsp-init.py" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/tools/usb-re/init-bulk-sequence.bin" "$UA_USB_LIB/"
 run_sudo cp "$PROJECT_DIR/scripts/ua-usb-init.sh" "$UA_USB_BIN/ua-usb-init"
-run_sudo cp "$PROJECT_DIR/scripts/ua-usb-dsp-init.sh" "$UA_USB_BIN/ua-usb-dsp-init"
-run_sudo chmod +x "$UA_USB_BIN/ua-usb-init" "$UA_USB_BIN/ua-usb-dsp-init"
+run_sudo cp "$PROJECT_DIR/scripts/ua-usb-post-firmware-stable.sh" \
+    "$UA_USB_BIN/ua-usb-post-firmware-stable"
+run_sudo chmod +x "$UA_USB_BIN/ua-usb-init"
+run_sudo chmod +x "$UA_USB_BIN/ua-usb-post-firmware-stable"
 
-run_sudo cp "$PROJECT_DIR/configs/udev/99-apollo-usb.rules" "$UDEV_DIR/"
+if [ "$INSTALL_MODE" = "legacy" ]; then
+    run_sudo cp "$PROJECT_DIR/scripts/ua-usb-dsp-init.sh" "$UA_USB_BIN/ua-usb-dsp-init"
+    run_sudo chmod +x "$UA_USB_BIN/ua-usb-dsp-init"
+    run_sudo cp "$PROJECT_DIR/configs/udev/99-apollo-usb.rules" \
+        "$UDEV_DIR/99-apollo-usb.rules"
+else
+    # Stable default: firmware-only udev hook (no automatic full DSP replay).
+    run_sudo cp "$PROJECT_DIR/configs/udev/99-apollo-usb-stable.rules" \
+        "$UDEV_DIR/99-apollo-usb.rules"
+fi
 run_sudo udevadm control --reload-rules 2>/dev/null || true
 
-ok "udev rules installed — Apollo will auto-init on power-on/reboot"
+if [ "$INSTALL_MODE" = "stable" ]; then
+    run_sudo rm -f "$UA_USB_BIN/ua-usb-dsp-init.disabled" 2>/dev/null || true
+    if [ -f "$UA_USB_BIN/ua-usb-dsp-init" ]; then
+        run_sudo mv "$UA_USB_BIN/ua-usb-dsp-init" "$UA_USB_BIN/ua-usb-dsp-init.disabled" 2>/dev/null || true
+    fi
+fi
+
+if [ "$INSTALL_MODE" = "legacy" ]; then
+    ok "udev rules installed (legacy mode) — firmware + DSP auto-init on power-on/reboot"
+else
+    ok "udev rules installed (stable mode) — Apollo firmware auto-loads on power-on/reboot"
+fi
 info "Firmware must be in $FW_DIR/ for auto-load to work"
 
 # ================================================================
@@ -737,6 +802,63 @@ WPEOF
 else
     warn "PipeWire not found — skipping virtual I/O setup"
     info "Audio still works via ALSA (aplay/arecord -D hw:USB)"
+fi
+
+# ================================================================
+# Step 7b: Install stable user auto-recovery services
+# ================================================================
+header "Stable Auto-Recovery Services"
+
+USER_SYSTEMD_DIR="$REAL_HOME/.config/systemd/user"
+info "Installing user services for automatic Apollo sink recovery..."
+
+run_sudo install -d -m 755 "$REAL_HOME"
+run_sudo install -d -m 755 "$USER_SYSTEMD_DIR"
+run_sudo install -m 755 "$PROJECT_DIR/scripts/apollo-safe-start.sh" \
+    "$REAL_HOME/apollo-safe-start.sh"
+run_sudo install -m 755 "$PROJECT_DIR/scripts/apollo-hotplug-watch.sh" \
+    "$REAL_HOME/apollo-hotplug-watch.sh"
+run_sudo install -m 644 "$PROJECT_DIR/configs/systemd/user/apollo-audio-fix.service" \
+    "$USER_SYSTEMD_DIR/apollo-audio-fix.service"
+run_sudo install -m 644 "$PROJECT_DIR/configs/systemd/user/apollo-hotplug-watch.service" \
+    "$USER_SYSTEMD_DIR/apollo-hotplug-watch.service"
+run_sudo chown "$REAL_USER:$REAL_USER" "$REAL_HOME/apollo-safe-start.sh" \
+    "$REAL_HOME/apollo-hotplug-watch.sh" \
+    "$USER_SYSTEMD_DIR/apollo-audio-fix.service" \
+    "$USER_SYSTEMD_DIR/apollo-hotplug-watch.service" 2>/dev/null || true
+
+if [ "$INSTALL_MODE" = "stable" ]; then
+    if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user daemon-reload 2>/dev/null && \
+       sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user enable --now apollo-audio-fix.service apollo-hotplug-watch.service 2>/dev/null; then
+        ok "Stable auto-recovery services enabled for user $REAL_USER"
+    else
+        warn "Could not enable user services automatically (session bus unavailable)"
+        info "Run manually after login:"
+        info "  bash $PROJECT_DIR/scripts/install-apollo-safe-user.sh"
+    fi
+else
+    info "Legacy mode selected: stable user services installed but not auto-enabled."
+    info "Enable manually if desired:"
+    info "  bash $PROJECT_DIR/scripts/install-apollo-safe-user.sh"
+fi
+
+# Final bootstrap in stable mode: apply sink/routing once now so a clean
+# install has working system playback immediately without extra commands.
+if [ "$INSTALL_MODE" = "stable" ]; then
+    info "Applying final stable audio bootstrap..."
+    if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        "$REAL_HOME/apollo-safe-start.sh" 2>/dev/null; then
+        ok "Stable bootstrap applied (default sink/routing refreshed)"
+    else
+        warn "Stable bootstrap could not run in this session"
+        info "Run manually after login:"
+        info "  ~/apollo-safe-start.sh"
+    fi
 fi
 
 # ================================================================
@@ -952,8 +1074,18 @@ echo ""
 info "To control preamp gain, 48V, monitor level:"
 echo "  sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py"
 echo ""
-info "After reboot, firmware + DSP init happen automatically via udev."
-info "If auto-init doesn't work, run manually:"
+if [ "$INSTALL_MODE" = "legacy" ]; then
+    info "After reboot, firmware + DSP init happen automatically via udev (legacy mode)."
+    info "Manual fallback:"
+else
+    info "After reboot, firmware auto-load happens via udev (stable mode)."
+    info "Stable user services auto-select Apollo sink and recover on hotplug."
+    info "Manual fallback:"
+fi
 echo "  sudo python3 $PROJECT_DIR/tools/fx3-load.py $FW_DIR/$FW_FILE"
-echo "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
+if [ "$INSTALL_MODE" = "legacy" ]; then
+    echo "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
+else
+    echo "  ~/apollo-safe-start.sh"
+fi
 echo ""
