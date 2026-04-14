@@ -5,7 +5,7 @@
 # DSP init, PipeWire config, audio test.
 #
 # Usage:
-#   sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--demo-ui]
+#   sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--demo-ui|--resume-verify|--no-guided-verify]
 #
 # Requires: Apollo USB plugged in, USB 3.0 port
 
@@ -20,6 +20,8 @@ VERSION="0.1.0"
 SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 INSTALL_MODE="stable"
 DEMO_UI=0
+RESUME_VERIFY=0
+GUIDED_VERIFY=1
 
 # --- Colors (needed before argv parsing for error messages) ---
 RED='\033[0;31m'
@@ -36,15 +38,18 @@ fail() { echo -e "${RED}[FAIL]${NC}  $*" >&2; }
 usage() {
     cat <<'EOF'
 Usage:
-  sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--demo-ui|--help]
+  sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--demo-ui|--resume-verify|--no-guided-verify|--help]
 
 Modes:
   --stable-default  Recommended. Firmware-only udev + user auto-recovery services.
   --legacy-dsp      Restores legacy full-DSP udev auto-init behavior.
   --demo-ui         Preview the installer UI only (no install, no root required).
+  --resume-verify   Run post-reboot checks (started automatically at login; or run manually).
+  --no-guided-verify  Skip guided Apollo power-cycle + post-reboot handoff.
 
 Environment:
   OPEN_APOLLO_ASSUME_YES=1   Skip interactive "press Enter" pauses (CI / scripts).
+  OPEN_APOLLO_SKIP_GUIDED_VERIFY=1   Skip guided power-cycle and post-reboot handoff (same as --no-guided-verify).
 EOF
 }
 
@@ -59,6 +64,12 @@ while [ $# -gt 0 ]; do
         --demo-ui)
             DEMO_UI=1
             ;;
+        --resume-verify)
+            RESUME_VERIFY=1
+            ;;
+        --no-guided-verify)
+            GUIDED_VERIFY=0
+            ;;
         --help|-h)
             usage
             exit 0
@@ -72,9 +83,17 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+if [ "${OPEN_APOLLO_SKIP_GUIDED_VERIFY:-0}" = "1" ]; then
+    GUIDED_VERIFY=0
+fi
+
 # Numbered wizard steps (keep in sync with header() calls below).
 STEP_NUM=1
-STEP_TOTAL=13
+if [ "$INSTALL_MODE" = "stable" ]; then
+    STEP_TOTAL=14
+else
+    STEP_TOTAL=13
+fi
 
 info()   { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
@@ -147,6 +166,284 @@ print_legacy_finish_guide() {
     echo ""
 }
 
+# Run a command in the target user's PipeWire / D-Bus session (works when install is root or resume is user).
+# After reboot, verification runs headless via systemd — surface results on the desktop when possible.
+open_apollo_resume_desktop_notice() {
+    local title="$1"
+    local body="$2"
+    local log_dir="$HOME/.config/open-apollo"
+    local logf="$log_dir/last-verify.txt"
+    mkdir -p "$log_dir" 2>/dev/null || true
+    {
+        echo "Open Apollo — post-reboot verification"
+        date -Iseconds 2>/dev/null || date
+        echo ""
+        echo "$title"
+        echo "$body"
+        echo ""
+        echo "Full terminal output is in: journalctl --user -u open-apollo-install-resume.service -e --no-pager"
+        echo "Manual re-check: bash $PROJECT_DIR/scripts/install-usb.sh --resume-verify"
+    } >"$logf" 2>/dev/null || true
+
+    if ! [ -t 0 ]; then
+        if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+            if [ -S "${XDG_RUNTIME_DIR:-}/wayland-0" ]; then
+                export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+            fi
+        fi
+        if command -v notify-send >/dev/null 2>&1; then
+            notify-send -a "Open Apollo" -t30000 "$title" "$body" 2>/dev/null || true
+        fi
+        # Non-blocking desktop hint (Plasma / KDE); avoids a modal wizard stealing focus at login.
+        if command -v kdialog >/dev/null 2>&1; then
+            kdialog --title "Open Apollo" --passivepopup "$title — $body" 20 2>/dev/null || true
+        elif command -v zenity >/dev/null 2>&1; then
+            zenity --notification --window-icon=dialog-information --text="$title — $body" 2>/dev/null || true
+        fi
+    fi
+}
+
+open_apollo_as_audio_user() {
+    local ru="${SUDO_USER:-$USER}"
+    local ruid
+    ruid=$(id -u "$ru" 2>/dev/null || echo "")
+    if [ -z "$ruid" ]; then
+        return 1
+    fi
+    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+        sudo -u "$ru" \
+            XDG_RUNTIME_DIR="/run/user/$ruid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$ruid/bus" \
+            "$@"
+    else
+        env \
+            XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$ruid}" \
+            DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$ruid/bus}" \
+            "$@"
+    fi
+}
+
+open_apollo_resume_verify_main() {
+    local rf="$HOME/.config/open-apollo/install-resume.json"
+    local pd phase imode
+    STEP_NUM=1
+    STEP_TOTAL=1
+    banner
+    header "Post-reboot verification"
+
+    if [ ! -f "$rf" ]; then
+        warn "No resume state at $rf — nothing to verify."
+        info "If you just finished install, reboot first; or run a full install again."
+        return 1
+    fi
+
+    phase=$(OA_RESUME_PATH="$rf" python3 -c "import json, os; print(json.load(open(os.environ['OA_RESUME_PATH'])).get('phase',''))" 2>/dev/null || echo "")
+    pd=$(OA_RESUME_PATH="$rf" python3 -c "import json, os; print(json.load(open(os.environ['OA_RESUME_PATH'])).get('project_dir',''))" 2>/dev/null || echo "")
+    imode=$(OA_RESUME_PATH="$rf" python3 -c "import json, os; print(json.load(open(os.environ['OA_RESUME_PATH'])).get('install_mode','stable'))" 2>/dev/null || echo "stable")
+
+    if [ "$phase" != "awaiting_reboot" ]; then
+        info "Resume file is not awaiting reboot (phase=$phase) — skipping."
+        return 0
+    fi
+
+    if [ -n "$pd" ] && [ -d "$pd" ]; then
+        PROJECT_DIR="$pd"
+    fi
+
+    # Background (systemd) run: let the graphical session and panel come up first.
+    if ! [ -t 0 ]; then
+        info "Waiting ~15s for the desktop session to settle…"
+        sleep 15
+    fi
+
+    info "Waiting for PipeWire / session audio (up to ~90s)…"
+    local _w=0
+    while [ "$_w" -lt 45 ]; do
+        if pgrep -x pipewire >/dev/null 2>&1 || systemctl --user is-active --quiet pipewire.service 2>/dev/null; then
+            break
+        fi
+        sleep 2
+        _w=$((_w + 1))
+    done
+    sleep 2
+
+    local fail=0
+    if ! lsusb 2>/dev/null | grep -qi '2b5a'; then
+        warn "USB: Universal Audio (2b5a) not seen on USB — check cable / port / power."
+        fail=1
+    else
+        ok "USB: Apollo device present"
+    fi
+
+    if ! grep -qi 'Apollo' /proc/asound/cards 2>/dev/null; then
+        warn "ALSA: no Apollo card in /proc/asound/cards"
+        fail=1
+    else
+        ok "ALSA: Apollo sound card visible"
+    fi
+
+    local def_sink
+    def_sink=$(open_apollo_as_audio_user pactl get-default-sink 2>/dev/null || true)
+    if [ -z "$def_sink" ]; then
+        warn "PipeWire: could not read default sink (session not ready?)"
+        fail=1
+    elif echo "$def_sink" | grep -qiE 'apollo|universal|monitor'; then
+        ok "PipeWire: default sink looks Apollo-related ($def_sink)"
+    else
+        warn "PipeWire: default sink is not obviously Apollo ($def_sink) — pick Apollo Monitor in desktop settings if needed."
+        fail=1
+    fi
+
+    # One-shot user unit: disable after this run (success or failure) so it does not repeat every login.
+    systemctl --user disable open-apollo-install-resume.service 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    if [ "$fail" -eq 0 ]; then
+        if [ -x "$HOME/apollo-safe-start.sh" ]; then
+            open_apollo_as_audio_user "$HOME/apollo-safe-start.sh" 2>/dev/null || true
+        fi
+        ok "Post-reboot verification passed."
+        if ! rm -f "$rf" 2>/dev/null; then
+            if command -v sudo >/dev/null 2>&1 && sudo -n rm -f "$rf" 2>/dev/null; then
+                :
+            else
+                warn "Could not remove $rf (fix ownership: sudo chown -R \"\$USER:\$USER\" \"$(dirname "$rf")\")"
+            fi
+        fi
+        open_apollo_resume_desktop_notice \
+            "Verification passed" \
+            "USB, ALSA, and default sink look good. Details: ~/.config/open-apollo/last-verify.txt"
+        echo ""
+        if [ "$imode" = "legacy" ]; then
+            print_legacy_finish_guide
+        else
+            print_stable_finish_guide
+        fi
+        return 0
+    fi
+
+    echo ""
+    warn "Post-reboot verification reported issues above."
+    open_apollo_resume_desktop_notice \
+        "Verification found issues" \
+        "See ~/.config/open-apollo/last-verify.txt or: journalctl --user -u open-apollo-install-resume.service -e"
+    info "Fix hardware or routing, then run:"
+    info "  bash $PROJECT_DIR/scripts/install-usb.sh --resume-verify"
+    info "Or: ${CYAN}~/apollo-safe-start.sh${NC}"
+    return 1
+}
+
+open_apollo_guided_hotplug_verify() {
+    [ "$INSTALL_MODE" = "stable" ] || return 0
+    [ "${GUIDED_VERIFY:-1}" = "1" ] || return 0
+    if [ "${OPEN_APOLLO_ASSUME_YES:-0}" = "1" ] || ! [ -t 0 ]; then
+        info "Skipping guided Apollo power cycle (non-interactive or OPEN_APOLLO_ASSUME_YES=1)."
+        return 0
+    fi
+
+    header "Guided verification (Apollo power cycle)"
+    echo ""
+    echo -e "   ${BOLD}Stress-test USB re-enumeration:${NC} turn ${BOLD}off${NC} Apollo (rear power),"
+    echo -e "   wait ~${BOLD}10 seconds${NC}, then turn it ${BOLD}on${NC} again."
+    echo ""
+    pause_if_tty "When Apollo is powered on again, press Enter so we can wait for USB + ALSA."
+    info "Waiting for Apollo on USB + ALSA (up to ~2 minutes)…"
+
+    local i=0
+    while [ "$i" -lt 60 ]; do
+        if lsusb 2>/dev/null | grep -qi '2b5a' && grep -qi 'Apollo' /proc/asound/cards 2>/dev/null; then
+            ok "Apollo detected after power cycle"
+            sleep 2
+            if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+                "$REAL_HOME/apollo-safe-start.sh" 2>/dev/null; then
+                ok "Stable bootstrap refreshed after hotplug"
+            else
+                warn "Could not run ~/apollo-safe-start.sh in this session — run it after login if routing is wrong."
+            fi
+            return 0
+        fi
+        sleep 2
+        i=$((i + 1))
+    done
+
+    warn "Timeout waiting for Apollo after power cycle — continuing install; check USB and run ~/apollo-safe-start.sh if needed."
+    return 1
+}
+
+open_apollo_register_reboot_resume() {
+    OPEN_APOLLO_REBOOT_CHECKPOINT=0
+    [ "$INSTALL_MODE" = "stable" ] || return 0
+    [ "${GUIDED_VERIFY:-1}" = "1" ] || return 0
+
+    local od="$REAL_HOME/.config/open-apollo"
+    local suf="$REAL_HOME/.config/systemd/user"
+    local rf="$od/install-resume.json"
+    local unit="$suf/open-apollo-install-resume.service"
+    local script_path="$PROJECT_DIR/scripts/install-usb.sh"
+
+    run_sudo install -d -m 755 "$od" "$suf"
+    # Directories created as root must be owned by the user or they cannot remove
+    # files inside (unlink needs write permission on the parent directory).
+    run_sudo chown "$REAL_USER:$REAL_USER" "$od" "$suf"
+
+    run_sudo env OA_RESUME_PATH="$rf" PROJECT_DIR="$PROJECT_DIR" REAL_UID="$REAL_UID" INSTALL_MODE="$INSTALL_MODE" python3 -c '
+import json, os
+p = os.environ["OA_RESUME_PATH"]
+d = {
+    "version": 1,
+    "phase": "awaiting_reboot",
+    "project_dir": os.environ["PROJECT_DIR"],
+    "install_mode": os.environ.get("INSTALL_MODE", "stable"),
+    "real_uid": int(os.environ.get("REAL_UID", "1000")),
+}
+os.makedirs(os.path.dirname(p), exist_ok=True)
+with open(p, "w") as f:
+    json.dump(d, f, indent=2)
+'
+    run_sudo chown "$REAL_USER:$REAL_USER" "$rf"
+
+    local _script_q
+    _script_q=$(printf '%q' "$script_path")
+    run_sudo tee "$unit" >/dev/null <<EOF
+[Unit]
+Description=Open Apollo — post-reboot verification (one-shot)
+After=default.target graphical-session.target
+Wants=pipewire.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+Environment=XDG_RUNTIME_DIR=/run/user/$REAL_UID
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus
+ExecStart=/bin/bash -c "exec bash $_script_q --resume-verify"
+
+[Install]
+WantedBy=default.target
+EOF
+    run_sudo chown "$REAL_USER:$REAL_USER" "$unit"
+
+    if sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user daemon-reload 2>/dev/null && \
+        sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$REAL_UID" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+        systemctl --user enable open-apollo-install-resume.service 2>/dev/null; then
+        ok "Post-reboot verification will run once at your next login."
+    else
+        warn "Could not enable the user resume unit (no user session bus?). After reboot run:"
+        info "  bash $script_path --resume-verify"
+    fi
+
+    echo ""
+    echo -e "   ${BOLD}Next:${NC} ${BOLD}reboot this PC${NC} when convenient. At next login we will verify USB + PipeWire"
+    echo -e "   automatically and print ${GREEN}PASS${NC} or what still needs attention."
+    echo -e "   ${DIM}Manual check:${NC} ${CYAN}bash $script_path --resume-verify${NC}"
+    echo ""
+    OPEN_APOLLO_REBOOT_CHECKPOINT=1
+}
+
 prompt() {
     local varname="$1"; shift
     if [ -t 0 ] && [ -e /dev/tty ]; then
@@ -176,11 +473,21 @@ if grep -q "clang version" /proc/version 2>/dev/null; then
     KERN_CC="clang"
 fi
 
+# Post-reboot verification only (user systemd or manual); no full install.
+if [ "${RESUME_VERIFY:-0}" = "1" ]; then
+    open_apollo_resume_verify_main
+    exit $?
+fi
+
 # Preview installer chrome only (no writes, no module build).
 if [ "${DEMO_UI:-0}" = "1" ]; then
     FW_FILE="${FW_FILE:-ApolloSolo.bin}"
     STEP_NUM=1
-    STEP_TOTAL=13
+    if [ "$INSTALL_MODE" = "stable" ]; then
+        STEP_TOTAL=14
+    else
+        STEP_TOTAL=13
+    fi
     banner
     echo -e "${MAGENTA}▸${NC} ${BOLD}Demo mode${NC} — no system changes are made. ${DIM}(You do not need sudo.)${NC}"
     echo ""
@@ -198,6 +505,11 @@ if [ "${DEMO_UI:-0}" = "1" ]; then
         "PipeWire Configuration"
         "Stable Auto-Recovery Services"
         "Audio Test"
+    )
+    if [ "$INSTALL_MODE" = "stable" ]; then
+        DEMO_TITLES+=("Guided verification (Apollo power cycle)")
+    fi
+    DEMO_TITLES+=(
         "Install Report"
         "Telemetry"
         "Installation Complete"
@@ -1025,6 +1337,8 @@ else
     warn "No Apollo ALSA card — skipping audio test"
 fi
 
+open_apollo_guided_hotplug_verify
+
 # ================================================================
 # Step 9: Install report
 # ================================================================
@@ -1181,6 +1495,18 @@ with open('$REPORT_FILE', 'w') as f: json.dump(d, f, indent=2)
     fi
 else
     info "No data sent. Report saved locally at $REPORT_FILE"
+fi
+
+open_apollo_register_reboot_resume
+
+if [ "${OPEN_APOLLO_REBOOT_CHECKPOINT:-0}" = "1" ]; then
+    echo ""
+    echo -e "${YELLOW}${BOLD}   Reboot checkpoint${NC}"
+    echo -e "   ${DIM}The numbered steps below finish this terminal session only.${NC}"
+    echo -e "   ${DIM}After you reboot, verification runs once in the background; you should see a${NC}"
+    echo -e "   ${DIM}desktop notification (and ~/.config/open-apollo/last-verify.txt).${NC}"
+    echo ""
+    pause_if_tty "Reboot the PC when you are done here. Press Enter to show the final on-screen summary (you can reboot before or after — verification is already scheduled for next login)."
 fi
 
 # ================================================================

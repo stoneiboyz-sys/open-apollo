@@ -227,6 +227,8 @@ Non-interactive installs (no “press Enter” prompts): `OPEN_APOLLO_ASSUME_YES
 
 Preview the installer UI only (no install): `bash scripts/install-usb.sh --demo-ui`
 
+In **stable** mode, an interactive install also walks you through a short **Apollo power-cycle** check (USB + ALSA), then schedules a **one-shot post-reboot verification** (user systemd at next login). After login you should get a **desktop notification** (and a text recap in `~/.config/open-apollo/last-verify.txt`); full logs: `journalctl --user -u open-apollo-install-resume.service -e`. Skip that handoff with `--no-guided-verify` or `OPEN_APOLLO_SKIP_GUIDED_VERIFY=1`. After reboot you can always run `bash scripts/install-usb.sh --resume-verify` manually.
+
 The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
 
 ### USB Stable Mode (Recommended)

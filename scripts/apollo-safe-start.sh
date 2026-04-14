@@ -72,23 +72,24 @@ if [ -x "$SETUP_APOLLO_SCRIPT" ]; then
 fi
 
 # Wait for PipeWire/Apollo nodes to appear and choose the best sink.
-# Prefer the real USB playback sink, fallback to virtual apollo_monitor.
+# Prefer virtual "Apollo Monitor" (apollo_monitor): it maps desktop stereo to the
+# hardware monitor paths via setup-apollo-solo-usb.sh. The raw ALSA sink
+# (analog-surround-21) is the same device exposed twice — using both as default
+# candidates makes Plasma / apps feel like they "fight" for playback.
 for _ in {1..180}; do
-  sink="$(
-    pactl list short sinks 2>/dev/null | awk '
-      $2 ~ /^alsa_output\.usb-Universal_Audio_Inc_Apollo_Solo_USB/ {print $2; found=1; exit}
-      END {if (!found) exit 1}
-    ' || true
-  )"
-  if [ -z "${sink:-}" ]; then
-    # Only use apollo_monitor if Apollo USB device is actually present.
-    if ! wpctl status 2>/dev/null | awk '/Apollo Solo USB[[:space:]]+\[alsa\]/{found=1} END{exit(found?0:1)}'; then
-      sleep 1
-      continue
-    fi
+  sink=""
+  if wpctl status 2>/dev/null | awk '/Apollo Solo USB[[:space:]]+\[alsa\]/{found=1} END{exit(found?0:1)}'; then
     sink="$(
       pactl list short sinks 2>/dev/null | awk '
         $2 == "apollo_monitor" {print $2; exit}
+      ' || true
+    )"
+  fi
+  if [ -z "${sink:-}" ]; then
+    sink="$(
+      pactl list short sinks 2>/dev/null | awk '
+        $2 ~ /^alsa_output\.usb-Universal_Audio_Inc_Apollo_Solo_USB/ {print $2; found=1; exit}
+        END {if (!found) exit 1}
       ' || true
     )"
   fi
