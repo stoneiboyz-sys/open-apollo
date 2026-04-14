@@ -2,6 +2,7 @@
 -- Install: ~/.config/wireplumber/main.lua.d/53-apollo-solo-usb-performance.lua
 --
 -- Change these when you need lower latency (smaller period) or fewer xruns (larger).
+-- Very small PERIOD_SIZE (e.g. 16–32) can cause USB xruns; raise if audio glitches.
 -- This is separate from PipeWire graph quantum (default.clock.*); see configs/pipewire/README.md
 --
 -- After editing: systemctl --user restart wireplumber pipewire

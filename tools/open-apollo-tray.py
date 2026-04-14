@@ -30,7 +30,8 @@ DAEMON_LOG = '/tmp/ua-mixer-daemon.log'
 POLL_INTERVAL = 5  # seconds
 
 WP_PERF_BASENAME = '53-apollo-solo-usb-performance.lua'
-BUFFER_PRESETS = (128, 256, 512, 1024, 2048)
+# Powers of two; 16–32 are very aggressive on USB (xruns / dropouts) but useful for min latency experiments.
+BUFFER_PRESETS = (16, 32, 64, 128, 256, 512, 1024, 2048)
 PERIOD_SIZE_RE = re.compile(r'^(local PERIOD_SIZE = )(\d+)(\s*)$', re.MULTILINE)
 
 # Ioctl numbers for BAR0 register read (Thunderbolt)
@@ -327,7 +328,9 @@ class ApolloTray:
         leader = None
         for sz in BUFFER_PRESETS:
             label = f'{sz} frames'
-            if sz == 512:
+            if sz < 64:
+                label += ' — may xrun'
+            elif sz == 512:
                 label += ' — default'
             if leader is None:
                 mi = Gtk.RadioMenuItem(label=label)
