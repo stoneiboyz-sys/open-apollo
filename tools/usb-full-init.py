@@ -5,11 +5,19 @@ Replays the complete 38-packet bulk init sequence captured from Windows
 UA Console, then sets the UAC2 clock and initial monitor level.
 This configures the FPGA routing matrix so capture channels receive signal.
 
-Usage: sudo python3 tools/usb-full-init.py
+Logs to stdout when connected to a TTY; otherwise to syslog (SysLogHandler
+ident ua-usb-dsp-init) so udev can run without a blocking pipe to logger(1).
 
-After running, reload snd-usb-audio:
+Usage:
+  sudo python3 tools/usb-full-init.py
+  sudo python3 tools/usb-full-init.py --vendor-monitor-hp-only
+
+After full init, reload snd-usb-audio:
     sudo rmmod snd_usb_audio; sudo insmod /tmp/sound/usb/snd-usb-audio.ko
 """
+import argparse
+import logging
+import logging.handlers
 import os
 import struct
 import sys
@@ -22,11 +30,116 @@ UA_VID = 0x2B5A
 SOLO_PID = 0x000D
 EP_BULK_OUT = 0x01
 EP_BULK_IN = 0x81
-# Look for init sequence in both repo layout and installed layout
+
+# Same facility/tag as scripts/ua-usb-dsp-init.sh (logger -t ua-usb-dsp-init)
+_SYSLOG_IDENT = "ua-usb-dsp-init:"
+
+LOG = logging.getLogger("usb_full_init")
+
+# Vendor ctrl 0x03 — mixer settings (same layout as tools/usb-monitor-enable.py)
+SETTINGS_SEQ = 0x0602
+SETTINGS_MASK = 0x062D
+SETTING_MONITOR_WA = 16
+SETTING_MONITOR_WB = 20
+MASK_MONITOR = 0x00FF
+MASK_HP1 = 0xFF00
+MASK_MUTEMONO = 0x0003
+
+# After full init uses seq 5000/5001, post-rebind vendor-only pass must stay higher
+# if the FPGA retains its counter across re-enumeration.
+SEQ_VENDOR_POST_REBIND = 10000
+
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 INIT_BIN = os.path.join(_script_dir, "usb-re", "init-bulk-sequence.bin")
 if not os.path.exists(INIT_BIN):
     INIT_BIN = os.path.join(_script_dir, "init-bulk-sequence.bin")
+
+
+def configure_logging():
+    """TTY → stdout; else syslog (non-blocking vs pipe-to-logger)."""
+    LOG.setLevel(logging.INFO)
+    LOG.handlers.clear()
+    LOG.propagate = False
+    fmt = logging.Formatter("%(message)s")
+    if sys.stdout.isatty():
+        h = logging.StreamHandler(sys.stdout)
+        h.setFormatter(fmt)
+        LOG.addHandler(h)
+    else:
+        try:
+            h = logging.handlers.SysLogHandler(
+                address="/dev/log",
+                facility=logging.handlers.SysLogHandler.LOG_USER,
+                ident=_SYSLOG_IDENT,
+            )
+            h.setFormatter(fmt)
+            LOG.addHandler(h)
+        except OSError:
+            h = logging.StreamHandler(sys.stderr)
+            h.setFormatter(fmt)
+            LOG.addHandler(h)
+
+
+def _setting_word(mask, value):
+    return ((mask & 0xFFFF) << 16) | (value & 0xFFFF)
+
+
+def _probe_seq_via_jkmk(dev):
+    """Optional seq hint from vendor 0x0A; often returns None (see usb-monitor-enable)."""
+    try:
+        data = bytes(dev.ctrl_transfer(0xC0, 0x0A, 0, 0, 48, timeout=300))
+        if data[:4] == b"JKMK":
+            return None
+    except usb.core.USBError:
+        pass
+    return None
+
+
+def _write_monitor_and_hp(dev, level_db, muted, seq):
+    """Write set[2] Monitor (LINE) + HP1 together (mask 0xffff) and seq; returns raw level byte."""
+    raw = max(0, min(0xC0, int(192 + level_db * 2)))
+    mute_flag = 0x0002 if muted else 0x0000
+    mask_buf = bytearray(128)
+    combined_mask = MASK_MONITOR | MASK_HP1
+    combined_value = (raw << 8) | raw
+    struct.pack_into(
+        "<I", mask_buf, SETTING_MONITOR_WA,
+        _setting_word(combined_mask, combined_value),
+    )
+    struct.pack_into(
+        "<I", mask_buf, SETTING_MONITOR_WB,
+        _setting_word(MASK_MUTEMONO, mute_flag),
+    )
+    dev.ctrl_transfer(0x41, 0x03, SETTINGS_MASK, 0, bytes(mask_buf), timeout=1000)
+    dev.ctrl_transfer(0x41, 0x03, SETTINGS_SEQ, 0, struct.pack("<I", seq), timeout=1000)
+    return raw
+
+
+def apply_vendor_monitor_hp(dev, level_db=-12.0, *, post_rebind=False):
+    """EP0-only: Monitor (LINE) + HP1 levels and unmute (two-step seq like usb-monitor-enable).
+
+    post_rebind: use SEQ_VENDOR_POST_REBIND so writes beat a prior full init's 5000/5001
+    if the FPGA counter survives USB rebind.
+    """
+    probed_seq = _probe_seq_via_jkmk(dev)
+    if post_rebind:
+        seq = SEQ_VENDOR_POST_REBIND
+        LOG.info("Settings seq: %s (post-rebind vendor pass)", seq)
+    elif probed_seq is not None:
+        seq = probed_seq + 100
+        LOG.info("Settings seq: %s (probed base=%s)", seq, probed_seq)
+    else:
+        seq = 5000
+        LOG.info("Settings seq: %s (safe default, above stale init counters)", seq)
+
+    raw = _write_monitor_and_hp(dev, level_db, False, seq)
+    LOG.info(
+        "Monitor+HP1: %.0f dB — Monitor[7:0]=HP1[15:8]=0x%02x, mask=0xffff, seq=%s",
+        level_db, raw, seq,
+    )
+    time.sleep(0.1)
+    _write_monitor_and_hp(dev, level_db, False, seq + 1)
+    LOG.info("Monitor+HP1: confirmed seq=%s", seq + 1)
 
 
 def replay_init_sequence(dev, bin_path):
@@ -40,14 +153,11 @@ def replay_init_sequence(dev, bin_path):
     The DSP needs time to process program loads before accepting routing
     writes.  Windows UA Console leaves 1+ second gaps between phases.
     """
-    # Packets after DSP program loads that are routing block writes —
-    # the DSP must finish processing programs before these succeed.
-    DSP_PROGRAM_END = 23      # last DSP program load packet
     ROUTING_START = 24        # first routing config packet
 
     with open(bin_path, "rb") as f:
         count = struct.unpack("<I", f.read(4))[0]
-        print(f"Replaying {count} bulk OUT packets...")
+        LOG.info("Replaying %s bulk OUT packets...", count)
         for i in range(count):
             pkt_len = struct.unpack("<I", f.read(4))[0]
             pkt_data = f.read(pkt_len)
@@ -56,7 +166,7 @@ def replay_init_sequence(dev, bin_path):
 
             # Phase transition delay — let DSP finish processing programs
             if i == ROUTING_START:
-                print("  -- waiting for DSP to process program loads --")
+                LOG.info("  -- waiting for DSP to process program loads --")
                 time.sleep(2.0)
 
             # All packets get generous timeout (AMD xHCI can be slow)
@@ -78,8 +188,10 @@ def replay_init_sequence(dev, bin_path):
                     if attempt == 2:
                         raise
                     wait = 1.0 * (attempt + 1)
-                    print(f"  [{i:2d}] timeout, retrying ({attempt+1}/3) "
-                          f"after {wait:.0f}s...")
+                    LOG.info(
+                        "  [%2d] timeout, retrying (%d/3) after %.0fs...",
+                        i, attempt + 1, wait,
+                    )
                     time.sleep(wait)
                     # Drain any stale responses before retry
                     try:
@@ -88,7 +200,7 @@ def replay_init_sequence(dev, bin_path):
                     except usb.core.USBTimeoutError:
                         pass
 
-            print(f"  [{i:2d}] type={cmd_type:3d} words={wc:3d} len={pkt_len}")
+            LOG.info("  [%2d] type=%3d words=%3d len=%s", i, cmd_type, wc, pkt_len)
 
             # Drain responses — wait longer after big packets
             drain_timeout = 1000 if pkt_len > 512 else 500
@@ -98,47 +210,69 @@ def replay_init_sequence(dev, bin_path):
             except usb.core.USBTimeoutError:
                 pass
 
-    print(f"  Sent all {count} packets")
+    LOG.info("  Sent all %s packets", count)
 
 
-dev = usb.core.find(idVendor=UA_VID, idProduct=SOLO_PID)
-if not dev:
-    print("Apollo Solo USB not found")
-    sys.exit(1)
-print(f"Found: {dev.product}")
+def run_full_dsp_init(dev):
+    if not os.path.exists(INIT_BIN):
+        LOG.error("Missing: %s", INIT_BIN)
+        sys.exit(1)
 
-if not os.path.exists(INIT_BIN):
-    print(f"Missing: {INIT_BIN}")
-    sys.exit(1)
+    try:
+        if dev.is_kernel_driver_active(0):
+            dev.detach_kernel_driver(0)
+    except Exception:
+        pass
+    usb.util.claim_interface(dev, 0)
 
-# Only detach Interface 0 (vendor DSP). Leave audio interfaces for snd-usb-audio.
-try:
-    if dev.is_kernel_driver_active(0):
-        dev.detach_kernel_driver(0)
-except Exception:
-    pass
-usb.util.claim_interface(dev, 0)
+    replay_init_sequence(dev, INIT_BIN)
 
-# Step 1: Full init sequence (FPGA + routing + DSP programs)
-replay_init_sequence(dev, INIT_BIN)
+    LOG.info("Writing mic->monitor routing...")
+    pkt_a = bytes([0x04, 0x00, 0x25, 0xdc, 0x04, 0x00, 0x0c, 0x00, 0xa8, 0x6b, 0x0c, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x19])
+    pkt_b = bytes([0x04, 0x00, 0x26, 0xdc, 0x04, 0x00, 0x0c, 0x00, 0xc4, 0x6a, 0x0c, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x04])
+    dev.write(EP_BULK_OUT, pkt_a, timeout=1000)
+    dev.write(EP_BULK_OUT, pkt_b, timeout=1000)
+    LOG.info("Mic->monitor routing: done")
 
-# Step 2: Set clock
-dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
-                  struct.pack("<I", 48000), timeout=2000)
-data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
-freq = struct.unpack("<I", bytes(data))[0]
-print(f"Clock: {freq} Hz")
+    dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
+                      struct.pack("<I", 48000), timeout=2000)
+    data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
+    freq = struct.unpack("<I", bytes(data))[0]
+    LOG.info("Clock: %s Hz", freq)
 
-usb.util.release_interface(dev, 0)
+    usb.util.release_interface(dev, 0)
 
-# Step 3: Set monitor level to -12dB via vendor ctrl (no interface claim needed)
-# Use high sequence counter (100) so FPGA processes it — the full init
-# leaves the internal counter at ~38, so seq=7 gets ignored.
-raw = int(192 + (-12) * 2)  # 0xa8
-mask_buf = bytearray(128)
-struct.pack_into("<I", mask_buf, 16, (0x00FF << 16) | raw)
-dev.ctrl_transfer(0x41, 0x03, 0x062D, 0, bytes(mask_buf), timeout=1000)
-dev.ctrl_transfer(0x41, 0x03, 0x0602, 0, struct.pack("<I", 100), timeout=1000)
-print("Monitor: -12 dB")
+    apply_vendor_monitor_hp(dev, post_rebind=False)
+    LOG.info("Ready — run 'sudo modprobe snd_usb_audio' to get ALSA card")
 
-print("Ready — run 'sudo modprobe snd_usb_audio' to get ALSA card")
+
+def main():
+    configure_logging()
+
+    parser = argparse.ArgumentParser(
+        description="Apollo Solo USB DSP init (bulk + vendor) or vendor-only pass.",
+    )
+    parser.add_argument(
+        "--vendor-monitor-hp-only",
+        action="store_true",
+        help="Only apply Monitor+HP1 vendor settings (no bulk DSP init). "
+        "Use after USB rebind when full init already ran.",
+    )
+    args = parser.parse_args()
+
+    dev = usb.core.find(idVendor=UA_VID, idProduct=SOLO_PID)
+    if not dev:
+        LOG.error("Apollo Solo USB not found")
+        sys.exit(1)
+    LOG.info("Found: %s", dev.product)
+
+    if args.vendor_monitor_hp_only:
+        apply_vendor_monitor_hp(dev, post_rebind=True)
+        LOG.info("Ready (vendor-only).")
+        return
+
+    run_full_dsp_init(dev)
+
+
+if __name__ == "__main__":
+    main()
