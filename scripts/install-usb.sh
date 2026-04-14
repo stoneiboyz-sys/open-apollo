@@ -5,7 +5,7 @@
 # DSP init, PipeWire config, audio test.
 #
 # Usage:
-#   sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp]
+#   sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--demo-ui]
 #
 # Requires: Apollo USB plugged in, USB 3.0 port
 
@@ -19,15 +19,29 @@ TELEMETRY_URL="https://open-apollo-api.rolotrealanis.workers.dev/reports"
 VERSION="0.1.0"
 SOURCE="${OPEN_APOLLO_SOURCE:-user}"
 INSTALL_MODE="stable"
+DEMO_UI=0
+
+# --- Colors (needed before argv parsing for error messages) ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+DIM='\033[2m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+fail() { echo -e "${RED}[FAIL]${NC}  $*" >&2; }
 
 usage() {
     cat <<'EOF'
 Usage:
-  sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--help]
+  sudo bash scripts/install-usb.sh [--stable-default|--legacy-dsp|--demo-ui|--help]
 
 Modes:
   --stable-default  Recommended. Firmware-only udev + user auto-recovery services.
   --legacy-dsp      Restores legacy full-DSP udev auto-init behavior.
+  --demo-ui         Preview the installer UI only (no install, no root required).
 
 Environment:
   OPEN_APOLLO_ASSUME_YES=1   Skip interactive "press Enter" pauses (CI / scripts).
@@ -42,6 +56,9 @@ while [ $# -gt 0 ]; do
         --legacy-dsp)
             INSTALL_MODE="legacy"
             ;;
+        --demo-ui)
+            DEMO_UI=1
+            ;;
         --help|-h)
             usage
             exit 0
@@ -55,16 +72,6 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# --- Colors ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-DIM='\033[2m'
-BOLD='\033[1m'
-NC='\033[0m'
-
 # Numbered wizard steps (keep in sync with header() calls below).
 STEP_NUM=1
 STEP_TOTAL=13
@@ -72,7 +79,6 @@ STEP_TOTAL=13
 info()   { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
 
 banner() {
     echo ""
@@ -168,6 +174,46 @@ run_sudo() {
 KERN_CC="gcc"
 if grep -q "clang version" /proc/version 2>/dev/null; then
     KERN_CC="clang"
+fi
+
+# Preview installer chrome only (no writes, no module build).
+if [ "${DEMO_UI:-0}" = "1" ]; then
+    FW_FILE="${FW_FILE:-ApolloSolo.bin}"
+    STEP_NUM=1
+    STEP_TOTAL=13
+    banner
+    echo -e "${MAGENTA}▸${NC} ${BOLD}Demo mode${NC} — no system changes are made. ${DIM}(You do not need sudo.)${NC}"
+    echo ""
+    pause_if_tty "This is the same \"press Enter\" prompt as a real install (USB 3 reminder)."
+    pause_if_tty "Next prompt simulates: patched kernel module build (can take a while on a real run)."
+    pause_if_tty "Next prompt simulates: reloading the USB audio driver (close apps using sound if asked)."
+    DEMO_TITLES=(
+        "Detecting System"
+        "Checking for Apollo USB"
+        "Dependencies"
+        "Firmware"
+        "Building patched snd-usb-audio kernel module"
+        "Initializing Apollo USB"
+        "Installing Auto-Init (udev)"
+        "PipeWire Configuration"
+        "Stable Auto-Recovery Services"
+        "Audio Test"
+        "Install Report"
+        "Telemetry"
+        "Installation Complete"
+    )
+    for _demo_title in "${DEMO_TITLES[@]}"; do
+        header "$_demo_title"
+        sleep 0.35
+    done
+    echo ""
+    ok "Demo finished (nothing was installed)."
+    if [ "$INSTALL_MODE" = "legacy" ]; then
+        print_legacy_finish_guide
+    else
+        print_stable_finish_guide
+    fi
+    exit 0
 fi
 
 # ================================================================
