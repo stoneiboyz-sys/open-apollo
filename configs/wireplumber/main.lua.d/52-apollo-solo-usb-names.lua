@@ -12,7 +12,8 @@ else
   table.insert(alsa_monitor.rules, {
     matches = {
       {
-        { "node.name", "matches", "alsa_output\\.usb-.*Apollo_Solo_USB.*" },
+        -- Same style as stock rules: "matches" is a regex; avoid over-escaping.
+        { "node.name", "matches", "alsa_output.*Apollo_Solo_USB.*" },
       },
     },
     apply_properties = {
@@ -20,6 +21,7 @@ else
       ["node.pause-on-idle"] = false,
       ["node.nick"] = "Apollo Solo USB",
       ["node.description"] = "Apollo Solo USB",
+      ["media.name"] = "Apollo Solo USB",
     },
   })
 
@@ -27,7 +29,7 @@ else
   table.insert(alsa_monitor.rules, {
     matches = {
       {
-        { "node.name", "matches", "alsa_input\\.usb-.*Apollo_Solo_USB.*" },
+        { "node.name", "matches", "alsa_input.*Apollo_Solo_USB.*" },
       },
     },
     apply_properties = {
@@ -35,6 +37,7 @@ else
       ["node.pause-on-idle"] = false,
       ["node.nick"] = "Apollo Solo USB",
       ["node.description"] = "Apollo Solo USB",
+      ["media.name"] = "Apollo Solo USB",
     },
   })
 
@@ -42,7 +45,7 @@ else
   table.insert(alsa_monitor.rules, {
     matches = {
       {
-        { "device.name", "matches", "alsa_card\\.usb-.*Apollo_Solo_USB.*" },
+        { "device.name", "matches", "alsa_card.*Apollo_Solo_USB.*" },
       },
     },
     apply_properties = {

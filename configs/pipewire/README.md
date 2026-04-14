@@ -38,6 +38,8 @@ Friendly labels for the raw ALSA nodes (**Apollo Solo USB** instead of “Analog
 
 Restart WirePlumber after editing. If names do not change, check `journalctl --user -u wireplumber.service` for Lua errors and run `wpctl status` / `wpctl inspect <id>` to confirm `node.name` still contains `Universal_Audio_Inc_Apollo_Solo_USB`.
 
+**Note:** `pactl list short sinks` shows the **sink Name** (the stable PipeWire id string) — it will stay long. Check the human label with `pactl list sinks` (look for `Description:`) or `wpctl inspect <id>` for `node.description` / `node.nick`.
+
 ## See also
 
 - `filter-chain/apollo-io-map.conf` — static reference / alternate layout (Thunderbolt-oriented)
