@@ -5,8 +5,19 @@ set -euo pipefail
 # ensure snd_usb_audio is present, then re-point PipeWire playback to Apollo.
 
 UA_USB_FULL_INIT="${UA_USB_FULL_INIT:-/usr/local/lib/ua-usb/usb-full-init.py}"
-OPEN_APOLLO_DIR="${OPEN_APOLLO_DIR:-$HOME/open-apollo}"
+# Prefer repo root next to this script when run from a git checkout (not only ~/open-apollo).
+_script="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")"
+_script_dir="$(dirname "$_script")"
+if [ -f "$_script_dir/../configs/pipewire/setup-apollo-solo-usb.sh" ]; then
+  OPEN_APOLLO_DIR="${OPEN_APOLLO_DIR:-$(cd "$_script_dir/.." && pwd)}"
+else
+  OPEN_APOLLO_DIR="${OPEN_APOLLO_DIR:-$HOME/open-apollo}"
+fi
 SETUP_APOLLO_SCRIPT="${SETUP_APOLLO_SCRIPT:-$OPEN_APOLLO_DIR/configs/pipewire/setup-apollo-solo-usb.sh}"
+
+if [ ! -f "$UA_USB_FULL_INIT" ] && [ -f "$OPEN_APOLLO_DIR/tools/usb-full-init.py" ]; then
+  UA_USB_FULL_INIT="$OPEN_APOLLO_DIR/tools/usb-full-init.py"
+fi
 
 # In user services, interactive sudo is unavailable.
 # Behavior:
