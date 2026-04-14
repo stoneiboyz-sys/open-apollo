@@ -67,6 +67,6 @@ Every register write was traced from the macOS kext via DTrace or Windows via BA
 
 - **Bug fix in audio routing?** → `driver/ua_audio.c` (pcm_prepare, transport start/stop)
 - **New Apollo model?** → `driver/ua_apollo.h` (device_type, channel counts)
-- **PipeWire config issue?** → `configs/pipewire/setup-apollo-io.sh`
+- **PipeWire virtual I/O?** → `configs/pipewire/README.md` (USB: `setup-apollo-solo-usb.sh`, Thunderbolt: `setup-apollo-io.sh`, dispatcher: `open-apollo-setup-io.sh`)
 - **Mixer protocol?** → `mixer-engine/ua_mixer_daemon.py`
 - **Install script?** → `scripts/install.sh`

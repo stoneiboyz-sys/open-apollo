@@ -54,6 +54,8 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 
 Issues and PRs should state which track they target (**base card** vs **DSP / legacy**).
 
+**PipeWire I/O** (which script generates which virtual devices): [`configs/pipewire/README.md`](configs/pipewire/README.md).
+
 ### USB Known Issues
 
 | Issue | Status | Notes |
