@@ -31,7 +31,12 @@ Regenerated on each successful run — **do not edit by hand**; fix the generato
 
 ## Display names (USB, Plasma / pavucontrol)
 
-Friendly labels for the raw ALSA nodes (**Apollo Solo USB** instead of “Analog Surround 2.1”) are set by **WirePlumber Lua** rules that extend `alsa_monitor.rules`: `configs/wireplumber/main.lua.d/99-apollo-solo-usb.lua` → installed to `~/.config/wireplumber/main.lua.d/`. Older JSON snippets under `wireplumber.conf.d/` are **not** used by modern WirePlumber for ALSA matching — use the Lua file. Restart WirePlumber after editing.
+Friendly labels for the raw ALSA nodes (**Apollo Solo USB** instead of “Analog Surround 2.1”) are applied by WirePlumber:
+
+- **Lua (0.4.x and up):** `configs/wireplumber/main.lua.d/52-apollo-solo-usb-names.lua` → `~/.config/wireplumber/main.lua.d/`
+- **SPA-JSON merge (0.5+):** `configs/wireplumber/wireplumber.conf.d/98-apollo-solo-usb-display.conf` → `~/.config/wireplumber/wireplumber.conf.d/`
+
+Restart WirePlumber after editing. If names do not change, check `journalctl --user -u wireplumber.service` for Lua errors and run `wpctl status` / `wpctl inspect <id>` to confirm `node.name` still contains `Universal_Audio_Inc_Apollo_Solo_USB`.
 
 ## See also
 

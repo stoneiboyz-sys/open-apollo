@@ -188,7 +188,9 @@ header "Removing WirePlumber overrides"
 
 WP_REMOVED=0
 for WP_CONF in \
+    "$REAL_HOME/.config/wireplumber/main.lua.d/52-apollo-solo-usb-names.lua" \
     "$REAL_HOME/.config/wireplumber/main.lua.d/99-apollo-solo-usb.lua" \
+    "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/98-apollo-solo-usb-display.conf" \
     "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-apollo-solo-usb.conf"
 do
     if [ -f "$WP_CONF" ]; then
