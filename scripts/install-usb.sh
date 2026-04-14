@@ -1222,6 +1222,22 @@ fi
 # ================================================================
 header "Session tray indicator"
 
+# Best-effort: pull GTK/AppIndicator bindings so autostart works without a manual apt step.
+if [ "$PKG_MGR" = "apt" ] && ! sudo -u "$REAL_USER" -H python3 -c \
+    "import gi; gi.require_version('Gtk','3.0'); gi.require_version('AppIndicator3','0.1')" \
+    2>/dev/null
+then
+    info "Installing optional tray packages (python3-gi, AppIndicator)…"
+    run_sudo apt-get install -y -qq python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 2>/dev/null || true
+fi
+if [ "$PKG_MGR" = "dnf" ] && ! sudo -u "$REAL_USER" -H python3 -c \
+    "import gi; gi.require_version('Gtk','3.0'); gi.require_version('AppIndicator3','0.1')" \
+    2>/dev/null
+then
+    info "Installing optional tray packages (GTK3, AppIndicator)…"
+    run_sudo dnf install -y gtk3 libappindicator-gtk3 python3-gobject 2>/dev/null || true
+fi
+
 TRAY_INSTALLER="$PROJECT_DIR/scripts/install-open-apollo-tray-autostart.sh"
 if [ -f "$TRAY_INSTALLER" ] && sudo -u "$REAL_USER" -H \
     HOME="$REAL_HOME" \

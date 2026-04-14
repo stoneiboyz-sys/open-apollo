@@ -45,7 +45,7 @@ Confirmed working on Ubuntu Studio 24.04 / Intel Tiger Lake-H by contributor @st
 - **PipeWire playback** — browser audio, system audio, DAWs all work
 - **Patched snd-usb-audio** — four out-of-tree patches (fixed-rate quirk, implicit feedback skip, endpoint compat bypass, IFACE_SKIP_CLOSE)
 - **Automatic init via udev** — firmware upload + full DSP init on device plug-in; no daemon required
-- **Session tray** — when AppIndicator is installed (`gir1.2-appindicator3-0.1` on Ubuntu), `install-usb.sh` registers autostart for `tools/open-apollo-tray.py`: icon reflects Solo USB + PipeWire readiness; menu **Buffer size (USB)** sets the ALSA period (128–2048 frames) and restarts PipeWire
+- **Session tray** — `install-usb.sh` tries to install GTK/AppIndicator packages on **apt** / **dnf** systems, then registers session autostart for `tools/open-apollo-tray.py` (icon = Solo USB + PipeWire readiness; menu **Buffer size (USB)**). If packages are unavailable, run **`bash scripts/install-open-apollo-tray-autostart.sh`** after installing them, then log out/in.
 
 ### USB project scope — base card vs DSP (do not mix the two)
 
