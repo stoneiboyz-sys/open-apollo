@@ -353,11 +353,14 @@ def run_full_dsp_init(dev, skip_indices=None):
     LOG.info("Mic->monitor routing + monitor-toggle DSP burst: done")
     _drain_bulk_in_until_idle(dev, 500)
 
-    dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
-                      struct.pack("<I", 48000), timeout=2000)
-    data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
-    freq = struct.unpack("<I", bytes(data))[0]
-    LOG.info("Clock: %s Hz", freq)
+    try:
+        dev.ctrl_transfer(0x21, 0x01, 0x0100, 0x8001,
+                          struct.pack("<I", 48000), timeout=2000)
+        data = dev.ctrl_transfer(0xA1, 0x01, 0x0100, 0x8001, 4, timeout=1000)
+        freq = struct.unpack("<I", bytes(data))[0]
+        LOG.info("Clock: %s Hz", freq)
+    except usb.core.USBError as e:
+        LOG.warning("Clock ctrl_transfer failed (continuing): %s", e)
 
     # Vendor 0x41 (recipient = interface) while iface 0 is still claimed — releasing first
     # can race udev/snd_usb_audio and leave monitor/HP writes ignored (hardware silent).
