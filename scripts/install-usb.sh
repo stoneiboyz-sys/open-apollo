@@ -77,8 +77,8 @@ fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
 banner() {
     echo ""
     echo -e "${BOLD}${CYAN}   ╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}   ║${NC}  ${BOLD}Open Apollo${NC} — Installation USB Apollo Solo / Twin      ${CYAN}║${NC}"
-    echo -e "${BOLD}${CYAN}   ║${NC}  ${DIM}Branchement USB 3.0 · firmware UA requis · mode stable${NC}   ${CYAN}║${NC}"
+    echo -e "${BOLD}${CYAN}   ║${NC}  ${BOLD}Open Apollo${NC} — USB setup (Apollo Solo / Twin / Twin X)   ${CYAN}║${NC}"
+    echo -e "${BOLD}${CYAN}   ║${NC}  ${DIM}USB 3.0 · UA firmware · guided install to stable audio${NC}  ${CYAN}║${NC}"
     echo -e "${BOLD}${CYAN}   ╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -92,7 +92,7 @@ pause_if_tty() {
     if [ -t 0 ] && [ -e /dev/tty ]; then
         echo ""
         echo -e "${MAGENTA}▸${NC} ${msg}"
-        read -r -p "$(echo -e "${DIM}   [Entrée] pour continuer…${NC}") " _ < /dev/tty || true
+        read -r -p "$(echo -e "${DIM}   [Enter] to continue…${NC}") " _ < /dev/tty || true
         echo ""
     fi
 }
@@ -107,37 +107,37 @@ header() {
 
 print_stable_finish_guide() {
     echo ""
-    echo -e "${GREEN}${BOLD}   ✓ Installation terminée — mode stable${NC}"
+    echo -e "${GREEN}${BOLD}   ✓ Setup complete — stable mode${NC}"
     echo ""
-    echo -e "${BOLD}   Votre Apollo est prête quand :${NC}"
-    echo -e "   ${DIM}1.${NC} Le son système sort sur les écouteurs / sorties Apollo"
-    echo -e "   ${DIM}2.${NC} Le monitoring micro → casque fonctionne"
-    echo -e "   ${DIM}3.${NC} Après un redémarrage ou un rebranchage USB, le son revient tout seul (quelques secondes)"
+    echo -e "${BOLD}   You are in a good state when:${NC}"
+    echo -e "   ${DIM}1.${NC} System audio plays through Apollo headphones / outputs"
+    echo -e "   ${DIM}2.${NC} Hardware mic → headphone monitoring works"
+    echo -e "   ${DIM}3.${NC} After reboot or USB hotplug, audio recovers automatically within a few seconds"
     echo ""
-    echo -e "${BOLD}   Périphériques virtuels (réglages son du bureau) :${NC}"
+    echo -e "${BOLD}   Virtual devices (desktop sound settings):${NC}"
     echo -e "   ${DIM}•${NC} Apollo Mic 1 / Mic 2 / Mic 1+2 (capture)"
-    echo -e "   ${DIM}•${NC} Apollo Monitor (lecture)"
+    echo -e "   ${DIM}•${NC} Apollo Monitor (playback)"
     echo ""
-    echo -e "${BOLD}   Vérifications rapides :${NC}"
+    echo -e "${BOLD}   Quick checks:${NC}"
     echo -e "   ${DIM}•${NC} ${CYAN}pactl get-default-sink${NC}"
     echo -e "   ${DIM}•${NC} ${CYAN}systemctl --user status apollo-audio-fix.service apollo-hotplug-watch.service --no-pager${NC}"
     echo ""
-    echo -e "${BOLD}   Raccourcis utiles${NC}"
-    echo -e "   ${DIM}•${NC} Préampli / 48 V : ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
-    echo -e "   ${DIM}•${NC} Si le son ne suit pas : ${CYAN}~/apollo-safe-start.sh${NC}"
+    echo -e "${BOLD}   Useful commands${NC}"
+    echo -e "   ${DIM}•${NC} Preamp / 48V: ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
+    echo -e "   ${DIM}•${NC} If routing lags: ${CYAN}~/apollo-safe-start.sh${NC}"
     echo ""
-    echo -e "${DIM}   Astuce : OPEN_APOLLO_ASSUME_YES=1 enlève les pauses « Entrée ».${NC}"
+    echo -e "${DIM}   Tip: OPEN_APOLLO_ASSUME_YES=1 skips the \"press Enter\" prompts.${NC}"
     echo ""
 }
 
 print_legacy_finish_guide() {
     echo ""
-    echo -e "${YELLOW}${BOLD}   Installation terminée — mode legacy (DSP complet via udev)${NC}"
+    echo -e "${YELLOW}${BOLD}   Setup complete — legacy mode (full DSP auto-init via udev)${NC}"
     echo ""
-    echo -e "   ${DIM}•${NC} Périphériques virtuels : Mic 1/2, Mic 1+2, Apollo Monitor"
-    echo -e "   ${DIM}•${NC} Préampli : ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
-    echo -e "   ${DIM}•${NC} Secours : ${CYAN}sudo python3 $PROJECT_DIR/tools/fx3-load.py $FW_DIR/$FW_FILE${NC}"
-    echo -e "   ${DIM}•${NC} Puis : ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py${NC}"
+    echo -e "   ${DIM}•${NC} Virtual devices: Mic 1/2, Mic 1+2, Apollo Monitor"
+    echo -e "   ${DIM}•${NC} Preamp: ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
+    echo -e "   ${DIM}•${NC} Fallback firmware: ${CYAN}sudo python3 $PROJECT_DIR/tools/fx3-load.py $FW_DIR/$FW_FILE${NC}"
+    echo -e "   ${DIM}•${NC} Then: ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py${NC}"
     echo ""
 }
 
@@ -174,7 +174,7 @@ fi
 # Step 1: System detection
 # ================================================================
 banner
-pause_if_tty "Vérifiez que l'Apollo est branchée en USB 3 (bleu). Ce guide vous mène jusqu'à l'état stable (son + monitoring)."
+pause_if_tty "Confirm Apollo is on a USB 3 port (often blue). This wizard walks you through to stable system audio + hardware monitoring."
 header "Detecting System"
 
 KERNEL=$(uname -r)
@@ -362,7 +362,7 @@ fi
 # ================================================================
 # Step 5: Build patched snd-usb-audio
 # ================================================================
-pause_if_tty "Prochaine étape : compilation du pilote noyau patché (plusieurs minutes possibles). Laissez l'installateur aller au bout."
+pause_if_tty "Next: building the patched kernel audio module (may take several minutes). Let the installer run to completion."
 header "Building patched snd-usb-audio kernel module"
 
 # BUILD_SUCCESS gates the rest of the install — if module build or kernel
@@ -571,7 +571,7 @@ fi
 # ================================================================
 # Step 6: Load firmware and init audio
 # ================================================================
-pause_if_tty "Étape sensible : rechargement du pilote USB audio. Fermez Spotify, le navigateur ou la visio si l'installateur demande de libérer le son."
+pause_if_tty "Next: reloading the USB audio driver. Close Spotify, browsers, or calls if the installer asks you to release /dev/snd."
 header "Initializing Apollo USB"
 
 # Load firmware if needed
