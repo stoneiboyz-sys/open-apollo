@@ -170,7 +170,7 @@ def apply_vendor_monitor_hp(
     LOG.info("Monitor+HP1: confirmed seq=%s", seq + 1)
 
 
-def replay_init_sequence(dev, bin_path):
+def replay_init_sequence(dev, bin_path, skip_indices=None):
     """Replay the captured init bulk sequence.
 
     The 38-packet sequence has three phases:
@@ -182,15 +182,47 @@ def replay_init_sequence(dev, bin_path):
     writes.  Windows UA Console leaves 1+ second gaps between phases.
     """
     ROUTING_START = 24        # first routing config packet
+    ROUTING_INTERPACKET_DELAY_SEC = 0.2
+    ROUTING_PREWRITE_DRAIN_MS = 150
+    RETRY_BACKOFF_SEC = (1.0, 2.0, 4.0)
+    SPECIAL_INDEX_28 = 28
+    SPECIAL_28_INTERPACKET_DELAY_SEC = 0.5
+    SPECIAL_28_WRITE_TIMEOUT_MS = 5000
+    SPECIAL_28_POST_SETTLE_SEC = 0.5
+    SPECIAL_28_POST_DRAIN_MS = 2000
+
+    if skip_indices is None:
+        skip_indices = set()
 
     with open(bin_path, "rb") as f:
         count = struct.unpack("<I", f.read(4))[0]
         LOG.info("Replaying %s bulk OUT packets...", count)
+        if skip_indices:
+            LOG.info("  Skip list enabled: %s", sorted(skip_indices))
+        packet_stats = []
         for i in range(count):
+            start_ts = time.monotonic()
             pkt_len = struct.unpack("<I", f.read(4))[0]
             pkt_data = f.read(pkt_len)
+            retries = 0
+            success = False
 
             wc, cmd_type, magic = struct.unpack_from("<HBB", pkt_data, 0)
+
+            if i in skip_indices:
+                elapsed_ms = (time.monotonic() - start_ts) * 1000.0
+                packet_stats.append({
+                    "index": i,
+                    "cmd_type": cmd_type,
+                    "words": wc,
+                    "len": pkt_len,
+                    "retries": 0,
+                    "elapsed_ms": elapsed_ms,
+                    "success": True,
+                    "skipped": True,
+                })
+                LOG.info("  [%2d] SKIP type=%3d words=%3d len=%s", i, cmd_type, wc, pkt_len)
+                continue
 
             # Phase transition delay — let DSP finish processing programs
             if i == ROUTING_START:
@@ -199,23 +231,31 @@ def replay_init_sequence(dev, bin_path):
 
             # All packets get generous timeout (AMD xHCI can be slow)
             timeout = 10000
+            if i == SPECIAL_INDEX_28:
+                timeout = SPECIAL_28_WRITE_TIMEOUT_MS
 
             # Inter-packet pacing: small delay between all packets,
             # longer delay after large ones (DSP program uploads)
             if i > 0:
-                if pkt_len > 512:
+                if i == SPECIAL_INDEX_28:
+                    time.sleep(SPECIAL_28_INTERPACKET_DELAY_SEC)
+                elif i >= ROUTING_START:
+                    time.sleep(ROUTING_INTERPACKET_DELAY_SEC)
+                elif pkt_len > 512:
                     time.sleep(0.2)
                 else:
                     time.sleep(0.05)
 
             for attempt in range(3):
                 try:
+                    if i >= ROUTING_START:
+                        _drain_bulk_in_until_idle(dev, ROUTING_PREWRITE_DRAIN_MS)
                     dev.write(EP_BULK_OUT, pkt_data, timeout=timeout)
+                    success = True
                     break
                 except usb.core.USBTimeoutError:
-                    if attempt == 2:
-                        raise
-                    wait = 1.0 * (attempt + 1)
+                    retries += 1
+                    wait = RETRY_BACKOFF_SEC[min(attempt, len(RETRY_BACKOFF_SEC) - 1)]
                     LOG.info(
                         "  [%2d] timeout, retrying (%d/3) after %.0fs...",
                         i, attempt + 1, wait,
@@ -223,17 +263,57 @@ def replay_init_sequence(dev, bin_path):
                     time.sleep(wait)
                     # Drain any stale responses before retry
                     _drain_bulk_in_until_idle(dev, 100)
+                    if attempt == 2:
+                        break
+
+            elapsed_ms = (time.monotonic() - start_ts) * 1000.0
+            packet_stats.append({
+                "index": i,
+                "cmd_type": cmd_type,
+                "words": wc,
+                "len": pkt_len,
+                "retries": retries,
+                "elapsed_ms": elapsed_ms,
+                "success": success,
+                "skipped": False,
+            })
+            if not success:
+                LOG.error("  [%2d] FAILED after %d retries (%.1fms)", i, retries, elapsed_ms)
+                break
 
             LOG.info("  [%2d] type=%3d words=%3d len=%s", i, cmd_type, wc, pkt_len)
 
             # Drain responses — wait longer after big packets
             drain_timeout = 1000 if pkt_len > 512 else 500
+            if i == SPECIAL_INDEX_28:
+                time.sleep(SPECIAL_28_POST_SETTLE_SEC)
+                drain_timeout = SPECIAL_28_POST_DRAIN_MS
             _drain_bulk_in_until_idle(dev, drain_timeout)
 
+    skipped_count = sum(1 for s in packet_stats if s.get("skipped"))
+    ok_count = sum(1 for s in packet_stats if s["success"] and not s.get("skipped"))
+    fail_count = len(packet_stats) - ok_count - skipped_count
+    total_ms = sum(s["elapsed_ms"] for s in packet_stats)
+    LOG.info(
+        "  Replay summary: ok=%s skipped=%s failed=%s total_time=%.1fms",
+        ok_count, skipped_count, fail_count, total_ms,
+    )
+    LOG.info("  Packet stats (idx type len retries elapsed_ms status):")
+    for s in packet_stats:
+        if s.get("skipped"):
+            status = "SKIP"
+        else:
+            status = "OK" if s["success"] else "FAIL"
+        LOG.info(
+            "    [%2d] t=%3d len=%4d retries=%d elapsed=%.1fms %s",
+            s["index"], s["cmd_type"], s["len"], s["retries"], s["elapsed_ms"], status,
+        )
+    if fail_count:
+        raise RuntimeError(f"Init bulk replay failed on packet index {packet_stats[-1]['index']}")
     LOG.info("  Sent all %s packets", count)
 
 
-def run_full_dsp_init(dev):
+def run_full_dsp_init(dev, skip_indices=None):
     if not os.path.exists(INIT_BIN):
         LOG.error("Missing: %s", INIT_BIN)
         sys.exit(1)
@@ -245,7 +325,7 @@ def run_full_dsp_init(dev):
         pass
     usb.util.claim_interface(dev, 0)
 
-    replay_init_sequence(dev, INIT_BIN)
+    replay_init_sequence(dev, INIT_BIN, skip_indices=skip_indices)
 
     LOG.info("Writing mic->monitor routing...")
     pkt_a = bytes([0x04, 0x00, 0x25, 0xdc, 0x04, 0x00, 0x1d, 0x00, 0x19, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00])
@@ -287,6 +367,26 @@ def run_full_dsp_init(dev):
     LOG.info("If hardware monitor is still silent: sudo python3 tools/usb-monitor-enable.py --seq 100000")
 
 
+def run_post_interface_routing(dev):
+    """Post-interface recovery pass after snd_usb_audio SET_INTERFACE.
+
+    Do NOT replay routing packets 24..37 here: they can override/disable the
+    native Apollo direct-monitor path in this post-interface context.
+    Apply only vendor Monitor+HP1 with a high seq counter.
+    """
+    try:
+        if dev.is_kernel_driver_active(0):
+            dev.detach_kernel_driver(0)
+    except Exception:
+        pass
+    usb.util.claim_interface(dev, 0)
+
+    LOG.info("Post-interface: vendor-only Monitor+HP1 (seq_min=100000)")
+    apply_vendor_monitor_hp(dev, post_rebind=False, seq_min=100000)
+    usb.util.release_interface(dev, 0)
+    LOG.info("Ready (post-interface vendor-only pass).")
+
+
 def main():
     configure_logging()
 
@@ -298,6 +398,19 @@ def main():
         action="store_true",
         help="Only apply Monitor+HP1 vendor settings (no bulk DSP init). "
         "Use after USB rebind when full init already ran.",
+    )
+    parser.add_argument(
+        "--post-interface",
+        action="store_true",
+        help="Replay only routing/toggle bulk DSP packets + vendor monitor pass. "
+        "Use after snd_usb_audio SET_INTERFACE without full 38-packet init.",
+    )
+    parser.add_argument(
+        "--skip-index",
+        action="append",
+        type=int,
+        default=[],
+        help="Skip one init-bulk packet index (repeatable). Example: --skip-index 28",
     )
     args = parser.parse_args()
 
@@ -311,8 +424,14 @@ def main():
         apply_vendor_monitor_hp(dev, post_rebind=True)
         LOG.info("Ready (vendor-only).")
         return
+    if args.post_interface:
+        run_post_interface_routing(dev)
+        return
 
-    run_full_dsp_init(dev)
+    skip_indices = set(args.skip_index)
+    if skip_indices:
+        LOG.info("Using --skip-index: %s", sorted(skip_indices))
+    run_full_dsp_init(dev, skip_indices=skip_indices)
 
 
 if __name__ == "__main__":

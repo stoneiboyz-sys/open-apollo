@@ -13,6 +13,16 @@ set -euo pipefail
 LOG_TAG="ua-usb-dsp-init"
 log() { logger -t "$LOG_TAG" "$*"; }
 
+LOCK_FILE="/run/ua-apollo-init.lock"
+INIT_FLAG="/run/ua-apollo-init-done"
+
+# Serialize udev-triggered runs (avoid concurrent init races).
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    log "Another init instance is running; exiting."
+    exit 0
+fi
+
 # Small delay for USB enumeration to settle
 sleep 8
 
@@ -42,13 +52,26 @@ if [ "$?" -ne 0 ]; then
     log "WARNING: modprobe -r snd_usb_audio failed (continuing)"
 fi
 
-log "Running full DSP init"
-set +e
-python3 -u /usr/local/lib/ua-usb/usb-full-init.py
-FULL_EC=$?
-set -e
-if [ "$FULL_EC" -ne 0 ]; then
-    log "WARNING: usb-full-init.py exited with code $FULL_EC (continuing)"
+FULL_EC=0
+if [ -f "$INIT_FLAG" ]; then
+    log "Init flag exists ($INIT_FLAG): skipping full DSP init"
+else
+    log "Running full DSP init"
+    set +e
+    python3 -u /usr/local/lib/ua-usb/usb-full-init.py \
+        --skip-index 15 --skip-index 16 --skip-index 17 --skip-index 18 --skip-index 19 \
+        --skip-index 20 --skip-index 21 --skip-index 22 \
+        --skip-index 23 --skip-index 24 --skip-index 25 --skip-index 26 --skip-index 27 \
+        --skip-index 28 --skip-index 29 --skip-index 30 --skip-index 31 --skip-index 32 \
+        --skip-index 33 --skip-index 34 --skip-index 35 --skip-index 36 --skip-index 37
+    FULL_EC=$?
+    set -e
+    if [ "$FULL_EC" -ne 0 ]; then
+        log "WARNING: usb-full-init.py exited with code $FULL_EC (continuing)"
+    else
+        : > "$INIT_FLAG"
+        log "Full DSP init succeeded; created flag $INIT_FLAG"
+    fi
 fi
 
 # Remove block before manual modprobe.
@@ -66,13 +89,13 @@ set -e
 log "Waiting 3s for PipeWire/WirePlumber node opens"
 sleep 3
 
-log "Re-applying Monitor+HP1 after snd_usb_audio load"
+log "Re-applying post-interface DSP routing after snd_usb_audio load"
 set +e
-python3 -u /usr/local/lib/ua-usb/usb-full-init.py --vendor-monitor-hp-only
-POST_LOAD_VENDOR_EC=$?
+python3 -u /usr/local/lib/ua-usb/usb-full-init.py --post-interface --skip-index 28
+POST_LOAD_ROUTING_EC=$?
 set -e
-if [ "$POST_LOAD_VENDOR_EC" -ne 0 ]; then
-    log "WARNING: post-load vendor-monitor-hp-only exited with code $POST_LOAD_VENDOR_EC"
+if [ "$POST_LOAD_ROUTING_EC" -ne 0 ]; then
+    log "WARNING: post-load --post-interface exited with code $POST_LOAD_ROUTING_EC"
 fi
 
 log "DSP init complete"
