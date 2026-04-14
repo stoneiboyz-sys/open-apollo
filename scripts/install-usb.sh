@@ -28,6 +28,9 @@ Usage:
 Modes:
   --stable-default  Recommended. Firmware-only udev + user auto-recovery services.
   --legacy-dsp      Restores legacy full-DSP udev auto-init behavior.
+
+Environment:
+  OPEN_APOLLO_ASSUME_YES=1   Skip interactive "press Enter" pauses (CI / scripts).
 EOF
 }
 
@@ -57,14 +60,86 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+# Numbered wizard steps (keep in sync with header() calls below).
+STEP_NUM=1
+STEP_TOTAL=13
 
 info()   { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()     { echo -e "${GREEN}[ OK ]${NC}  $*"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()   { echo -e "${RED}[FAIL]${NC}  $*"; }
-header() { echo -e "\n${BOLD}── $* ──${NC}"; }
+
+banner() {
+    echo ""
+    echo -e "${BOLD}${CYAN}   ╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${CYAN}   ║${NC}  ${BOLD}Open Apollo${NC} — Installation USB Apollo Solo / Twin      ${CYAN}║${NC}"
+    echo -e "${BOLD}${CYAN}   ║${NC}  ${DIM}Branchement USB 3.0 · firmware UA requis · mode stable${NC}   ${CYAN}║${NC}"
+    echo -e "${BOLD}${CYAN}   ╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+# Pause only when running interactively in a real terminal (not CI / pipes).
+pause_if_tty() {
+    local msg="$*"
+    if [ "${OPEN_APOLLO_ASSUME_YES:-0}" = "1" ]; then
+        return 0
+    fi
+    if [ -t 0 ] && [ -e /dev/tty ]; then
+        echo ""
+        echo -e "${MAGENTA}▸${NC} ${msg}"
+        read -r -p "$(echo -e "${DIM}   [Entrée] pour continuer…${NC}") " _ < /dev/tty || true
+        echo ""
+    fi
+}
+
+header() {
+    local title="$*"
+    echo ""
+    echo -e "${CYAN}${BOLD}━━ ${STEP_NUM}/${STEP_TOTAL} ━━${NC}  ${BOLD}${title}${NC}"
+    echo -e "${DIM}$(printf '─%.0s' {1..60})${NC}"
+    STEP_NUM=$((STEP_NUM + 1))
+}
+
+print_stable_finish_guide() {
+    echo ""
+    echo -e "${GREEN}${BOLD}   ✓ Installation terminée — mode stable${NC}"
+    echo ""
+    echo -e "${BOLD}   Votre Apollo est prête quand :${NC}"
+    echo -e "   ${DIM}1.${NC} Le son système sort sur les écouteurs / sorties Apollo"
+    echo -e "   ${DIM}2.${NC} Le monitoring micro → casque fonctionne"
+    echo -e "   ${DIM}3.${NC} Après un redémarrage ou un rebranchage USB, le son revient tout seul (quelques secondes)"
+    echo ""
+    echo -e "${BOLD}   Périphériques virtuels (réglages son du bureau) :${NC}"
+    echo -e "   ${DIM}•${NC} Apollo Mic 1 / Mic 2 / Mic 1+2 (capture)"
+    echo -e "   ${DIM}•${NC} Apollo Monitor (lecture)"
+    echo ""
+    echo -e "${BOLD}   Vérifications rapides :${NC}"
+    echo -e "   ${DIM}•${NC} ${CYAN}pactl get-default-sink${NC}"
+    echo -e "   ${DIM}•${NC} ${CYAN}systemctl --user status apollo-audio-fix.service apollo-hotplug-watch.service --no-pager${NC}"
+    echo ""
+    echo -e "${BOLD}   Raccourcis utiles${NC}"
+    echo -e "   ${DIM}•${NC} Préampli / 48 V : ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
+    echo -e "   ${DIM}•${NC} Si le son ne suit pas : ${CYAN}~/apollo-safe-start.sh${NC}"
+    echo ""
+    echo -e "${DIM}   Astuce : OPEN_APOLLO_ASSUME_YES=1 enlève les pauses « Entrée ».${NC}"
+    echo ""
+}
+
+print_legacy_finish_guide() {
+    echo ""
+    echo -e "${YELLOW}${BOLD}   Installation terminée — mode legacy (DSP complet via udev)${NC}"
+    echo ""
+    echo -e "   ${DIM}•${NC} Périphériques virtuels : Mic 1/2, Mic 1+2, Apollo Monitor"
+    echo -e "   ${DIM}•${NC} Préampli : ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py${NC}"
+    echo -e "   ${DIM}•${NC} Secours : ${CYAN}sudo python3 $PROJECT_DIR/tools/fx3-load.py $FW_DIR/$FW_FILE${NC}"
+    echo -e "   ${DIM}•${NC} Puis : ${CYAN}sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py${NC}"
+    echo ""
+}
 
 prompt() {
     local varname="$1"; shift
@@ -98,6 +173,8 @@ fi
 # ================================================================
 # Step 1: System detection
 # ================================================================
+banner
+pause_if_tty "Vérifiez que l'Apollo est branchée en USB 3 (bleu). Ce guide vous mène jusqu'à l'état stable (son + monitoring)."
 header "Detecting System"
 
 KERNEL=$(uname -r)
@@ -285,6 +362,7 @@ fi
 # ================================================================
 # Step 5: Build patched snd-usb-audio
 # ================================================================
+pause_if_tty "Prochaine étape : compilation du pilote noyau patché (plusieurs minutes possibles). Laissez l'installateur aller au bout."
 header "Building patched snd-usb-audio kernel module"
 
 # BUILD_SUCCESS gates the rest of the install — if module build or kernel
@@ -493,6 +571,7 @@ fi
 # ================================================================
 # Step 6: Load firmware and init audio
 # ================================================================
+pause_if_tty "Étape sensible : rechargement du pilote USB audio. Fermez Spotify, le navigateur ou la visio si l'installateur demande de libérer le son."
 header "Initializing Apollo USB"
 
 # Load firmware if needed
@@ -1064,28 +1143,8 @@ fi
 header "Installation Complete"
 echo ""
 ok "Apollo USB setup finished!"
-echo ""
-info "Virtual I/O devices available in your sound settings:"
-echo "  - Apollo Mic 1       (capture, mono)"
-echo "  - Apollo Mic 2       (capture, mono)"
-echo "  - Apollo Mic 1+2     (capture, stereo)"
-echo "  - Apollo Monitor     (playback, stereo)"
-echo ""
-info "To control preamp gain, 48V, monitor level:"
-echo "  sudo python3 $PROJECT_DIR/tools/usb-mixer-test.py"
-echo ""
-if [ "$INSTALL_MODE" = "legacy" ]; then
-    info "After reboot, firmware + DSP init happen automatically via udev (legacy mode)."
-    info "Manual fallback:"
+if [ "$INSTALL_MODE" = "stable" ]; then
+    print_stable_finish_guide
 else
-    info "After reboot, firmware auto-load happens via udev (stable mode)."
-    info "Stable user services auto-select Apollo sink and recover on hotplug."
-    info "Manual fallback:"
+    print_legacy_finish_guide
 fi
-echo "  sudo python3 $PROJECT_DIR/tools/fx3-load.py $FW_DIR/$FW_FILE"
-if [ "$INSTALL_MODE" = "legacy" ]; then
-    echo "  sudo python3 $PROJECT_DIR/tools/usb-dsp-init.py"
-else
-    echo "  ~/apollo-safe-start.sh"
-fi
-echo ""

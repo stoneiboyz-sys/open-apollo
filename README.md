@@ -223,6 +223,8 @@ sudo bash scripts/install-usb.sh --stable-default
 sudo bash scripts/install-usb.sh --legacy-dsp
 ```
 
+Non-interactive installs (no “press Enter” prompts): `OPEN_APOLLO_ASSUME_YES=1 sudo -E bash scripts/install-usb.sh --stable-default`
+
 The installer handles dependencies, firmware setup, kernel module build, DSP initialization, and PipeWire configuration. You'll need the Apollo firmware file from UA's website — the installer will prompt you if it's missing.
 
 ### USB Stable Mode (Recommended)
