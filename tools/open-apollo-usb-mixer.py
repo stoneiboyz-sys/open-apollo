@@ -185,6 +185,9 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         self._scroll = scroll
         for target in wheel_targets:
             self._bind_wheel_scroll_capture(target)
+        # Sur le curseur lui-même, Gtk.Range capte la molette avant l’ancêtre PreferencesGroup.
+        for scale in (self.gain_0, self.gain_1, self.monitor_scale):
+            self._bind_scale_wheel_scroll_only(scale)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -215,23 +218,45 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         ctrl.connect('scroll', self._on_wheel_scroll_capture)
         widget.add_controller(ctrl)
 
-    def _on_wheel_scroll_capture(
-        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
+    def _bind_scale_wheel_scroll_only(self, scale: Gtk.Scale) -> None:
+        """CAPTURE en tête du Scale : la molette ne modifie pas la valeur, elle défile la liste."""
+        ctrl = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL
+            | Gtk.EventControllerScrollFlags.HORIZONTAL
+        )
+        ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        ctrl.connect('scroll', self._on_scale_wheel_capture)
+        if hasattr(scale, 'prepend_controller'):
+            scale.prepend_controller(ctrl)
+        else:
+            scale.add_controller(ctrl)
+
+    def _wheel_redirect_scroll(
+        self, dx: float, dy: float, *, consume_when_no_range: bool
     ) -> bool:
-        # Molette discrète : dy vaut typiquement ±1. Trackpad lisse peut envoyer dx/dy plus petits.
         delta = dy if abs(dy) >= abs(dx) else dx
-        if delta == 0:
+        if abs(delta) < 1e-6:
             return False
         adj = self._scroll.get_vadjustment()
         lo = adj.get_lower()
         hi = adj.get_upper() - adj.get_page_size()
         if hi <= lo + 0.5:
-            return False
-        # Déplacement en pixels (indépendant de step_increment souvent nul sur ce vadjustment).
+            return consume_when_no_range
         pixels = 72.0 * float(delta)
         new_val = adj.get_value() + pixels
         adj.set_value(max(lo, min(hi, new_val)))
         return True
+
+    def _on_wheel_scroll_capture(
+        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
+    ) -> bool:
+        return self._wheel_redirect_scroll(dx, dy, consume_when_no_range=False)
+
+    def _on_scale_wheel_capture(
+        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
+    ) -> bool:
+        # Toujours consommer si la molette a bougé : sinon Gtk.Range change le gain / monitor.
+        return self._wheel_redirect_scroll(dx, dy, consume_when_no_range=True)
 
     def _toast_usb_error(self, message: str) -> None:
         text = f'USB : {message}'
