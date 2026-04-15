@@ -166,6 +166,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         page.add(mon_grp)
 
+        self._bind_wheel_scroll_capture(page)
+
         clamp = Adw.Clamp()
         clamp.set_maximum_size(560)
         clamp.set_child(page)
@@ -178,9 +180,6 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll.set_propagate_natural_height(False)
         scroll.set_child(clamp)
         self._scroll = scroll
-        self._bind_scale_wheel_scrolls_page(self.gain_0)
-        self._bind_scale_wheel_scrolls_page(self.gain_1)
-        self._bind_scale_wheel_scrolls_page(self.monitor_scale)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -203,14 +202,14 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         GLib.idle_add(self.on_reconnect, None)
 
-    def _bind_scale_wheel_scrolls_page(self, scale: Gtk.Scale) -> None:
-        """Molette sur les curseurs : fait défiler la page, ne change pas la valeur."""
+    def _bind_wheel_scroll_capture(self, widget: Gtk.Widget) -> None:
+        """Molette : toujours faire défiler le ScrolledWindow (priorité sur les contrôles)."""
         ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        ctrl.connect('scroll', self._on_scale_wheel_scroll)
-        scale.add_controller(ctrl)
+        ctrl.connect('scroll', self._on_wheel_scroll_capture)
+        widget.add_controller(ctrl)
 
-    def _on_scale_wheel_scroll(
+    def _on_wheel_scroll_capture(
         self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
     ) -> bool:
         delta = dy if abs(dy) >= abs(dx) else dx
