@@ -74,10 +74,6 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         outer.append(status_box)
 
         page = Adw.PreferencesPage()
-        # Sections où la molette doit défiler (attachées après création du ScrolledWindow).
-        wheel_targets: list[Gtk.Widget] = []
-        # Lignes « Gain » / « Niveau monitor » : intercepter avant le Gtk.Scale suffixe.
-        wheel_action_rows: list[Gtk.Widget] = []
 
         for ch in (0, 1):
             grp = Adw.PreferencesGroup(title=f'Entrée {ch + 1}')
@@ -131,10 +127,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
             gain_row.set_activatable(False)
             grp.add(gain_row)
             setattr(self, f'gain_{ch}', sc)
-            wheel_action_rows.append(gain_row)
 
             page.add(grp)
-            wheel_targets.append(grp)
 
         mon_grp = Adw.PreferencesGroup(
             title='Monitor — casque',
@@ -159,7 +153,6 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         mon_row.set_activatable(False)
         mon_grp.add(mon_row)
         self.monitor_scale = msc
-        wheel_action_rows.append(mon_row)
 
         sw_mute = Adw.SwitchRow(title='Muet')
         sw_mute.connect('notify::active', self._on_monitor_mute_mono)
@@ -172,7 +165,6 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         self.monitor_mono = sw_mono
 
         page.add(mon_grp)
-        wheel_targets.append(mon_grp)
 
         clamp = Adw.Clamp()
         clamp.set_maximum_size(560)
@@ -187,10 +179,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll.set_min_content_height(200)
         scroll.set_child(clamp)
         self._scroll = scroll
-        for target in wheel_targets:
-            self._bind_wheel_scroll_capture(target)
-        for row in wheel_action_rows:
-            self._bind_wheel_scroll_row_prepend(row)
+        # Un seul contrôleur, en tête du ScrolledWindow : la molette ne descend jamais jusqu’aux Gtk.Scale.
+        self._bind_wheel_scroll_scrolled_window_prepend(scroll)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -213,55 +203,41 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         GLib.idle_add(self.on_reconnect, None)
 
-    def _bind_wheel_scroll_capture(self, widget: Gtk.Widget) -> None:
-        """CAPTURE sur chaque bloc de réglages : la molette défile avant SwitchRow / Scale."""
+    def _bind_wheel_scroll_scrolled_window_prepend(self, scroll: Gtk.ScrolledWindow) -> None:
+        """Un contrôleur CAPTURE en tête du ScrolledWindow : avant tout le contenu (dont Gtk.Scale)."""
         ctrl = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
             | Gtk.EventControllerScrollFlags.HORIZONTAL
         )
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        ctrl.connect('scroll', self._on_wheel_scroll_capture)
-        widget.add_controller(ctrl)
-
-    def _bind_wheel_scroll_row_prepend(self, row: Gtk.Widget) -> None:
-        """CAPTURE en tête de la ligne (ActionRow) : avant le Gtk.Scale en suffixe."""
-        ctrl = Gtk.EventControllerScroll.new(
-            Gtk.EventControllerScrollFlags.VERTICAL
-            | Gtk.EventControllerScrollFlags.HORIZONTAL
-        )
-        ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        ctrl.connect('scroll', self._on_action_row_wheel_capture)
-        if hasattr(row, 'prepend_controller'):
-            row.prepend_controller(ctrl)
+        ctrl.connect('scroll', self._on_scrolled_window_wheel_capture)
+        if hasattr(scroll, 'prepend_controller'):
+            scroll.prepend_controller(ctrl)
         else:
-            row.add_controller(ctrl)
+            scroll.add_controller(ctrl)
 
-    def _wheel_redirect_scroll(
-        self, dx: float, dy: float, *, consume_when_no_range: bool
-    ) -> bool:
+    def _wheel_scroll_viewport(self, dx: float, dy: float) -> None:
         delta = dy if abs(dy) >= abs(dx) else dx
         if abs(delta) < 1e-6:
-            return False
+            return
         adj = self._scroll.get_vadjustment()
         lo = adj.get_lower()
         hi = adj.get_upper() - adj.get_page_size()
         if hi <= lo + 0.5:
-            return consume_when_no_range
+            return
         pixels = 72.0 * float(delta)
         new_val = adj.get_value() + pixels
         adj.set_value(max(lo, min(hi, new_val)))
+
+    def _on_scrolled_window_wheel_capture(
+        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
+    ) -> bool:
+        delta = dy if abs(dy) >= abs(dx) else dx
+        if abs(delta) < 1e-6:
+            return False
+        self._wheel_scroll_viewport(dx, dy)
+        # Toujours True : la molette ne doit pas atteindre Gtk.Range (curseurs horizontaux).
         return True
-
-    def _on_wheel_scroll_capture(
-        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
-    ) -> bool:
-        return self._wheel_redirect_scroll(dx, dy, consume_when_no_range=False)
-
-    def _on_action_row_wheel_capture(
-        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
-    ) -> bool:
-        # Toujours consommer si la molette a bougé : le Scale en suffixe ne doit pas la voir.
-        return self._wheel_redirect_scroll(dx, dy, consume_when_no_range=True)
 
     def _toast_usb_error(self, message: str) -> None:
         text = f'USB : {message}'
