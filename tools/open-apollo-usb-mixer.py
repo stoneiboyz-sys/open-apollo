@@ -74,6 +74,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         outer.append(status_box)
 
         page = Adw.PreferencesPage()
+        # Sections où la molette doit défiler (attachées après création du ScrolledWindow).
+        wheel_targets: list[Gtk.Widget] = []
 
         for ch in (0, 1):
             grp = Adw.PreferencesGroup(title=f'Entrée {ch + 1}')
@@ -129,6 +131,7 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
             setattr(self, f'gain_{ch}', sc)
 
             page.add(grp)
+            wheel_targets.append(grp)
 
         mon_grp = Adw.PreferencesGroup(
             title='Monitor — casque',
@@ -165,6 +168,7 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         self.monitor_mono = sw_mono
 
         page.add(mon_grp)
+        wheel_targets.append(mon_grp)
 
         clamp = Adw.Clamp()
         clamp.set_maximum_size(560)
@@ -176,10 +180,11 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll.set_hexpand(True)
         scroll.set_kinetic_scrolling(True)
         scroll.set_propagate_natural_height(False)
+        scroll.set_min_content_height(200)
         scroll.set_child(clamp)
         self._scroll = scroll
-        # CAPTURE sur le ScrolledWindow : la molette arrive ici avant les lignes / Scale.
-        self._bind_wheel_scroll_capture(scroll)
+        for target in wheel_targets:
+            self._bind_wheel_scroll_capture(target)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -202,32 +207,29 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         GLib.idle_add(self.on_reconnect, None)
 
-    def _bind_wheel_scroll_capture(self, scroll: Gtk.ScrolledWindow) -> None:
-        """Molette : défiler le viewport avant que les enfants (Scale, rows) ne mangent l’événement."""
-        ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
+    def _bind_wheel_scroll_capture(self, widget: Gtk.Widget) -> None:
+        """CAPTURE sur chaque bloc de réglages : la molette défile avant SwitchRow / Scale."""
+        # VERTICAL seul : avec DISCRETE, dy peut rester à 0 sur certains trackpads / Wayland.
+        ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl.connect('scroll', self._on_wheel_scroll_capture)
-        scroll.add_controller(ctrl)
+        widget.add_controller(ctrl)
 
     def _on_wheel_scroll_capture(
         self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
     ) -> bool:
+        # Molette discrète : dy vaut typiquement ±1. Trackpad lisse peut envoyer dx/dy plus petits.
         delta = dy if abs(dy) >= abs(dx) else dx
         if delta == 0:
             return False
         adj = self._scroll.get_vadjustment()
-        # step_increment du vadjustment est souvent 0 avant/après layout ; forcer des pixels.
-        step = float(adj.get_step_increment())
-        if step < 1.0:
-            step = float(adj.get_page_increment()) or 48.0
-        pixels = step * (1.0 + 2.0 * min(3.0, abs(delta)))
-        if delta < 0:
-            pixels = -pixels
-        if abs(pixels) < 8.0:
-            pixels = 64.0 if delta > 0 else -64.0
-        new_val = adj.get_value() + pixels
         lo = adj.get_lower()
         hi = adj.get_upper() - adj.get_page_size()
+        if hi <= lo + 0.5:
+            return False
+        # Déplacement en pixels (indépendant de step_increment souvent nul sur ce vadjustment).
+        pixels = 72.0 * float(delta)
+        new_val = adj.get_value() + pixels
         adj.set_value(max(lo, min(hi, new_val)))
         return True
 
