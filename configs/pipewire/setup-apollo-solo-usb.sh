@@ -34,17 +34,17 @@ for obj in json.load(sys.stdin):
 [ -z "$DEVICE_ID" ] && { log "Apollo Solo USB not found in PipeWire"; exit 1; }
 log "Device ID: $DEVICE_ID"
 
-# Use a stereo profile by default (avoid LFE/capture quirks on WebRTC apps).
-# Override with APOLLO_USB_PROFILE if needed.
-APOLLO_USB_PROFILE="${APOLLO_USB_PROFILE:-0}"
-wpctl set-profile "$DEVICE_ID" "$APOLLO_USB_PROFILE" 2>/dev/null || true
-sleep 1
-log "Apollo profile set to $APOLLO_USB_PROFILE"
+# Try preferred profile first, then fallback to 1 if no input node appears.
+# Some systems expose Apollo input only in profile 1.
+PREFERRED_PROFILE="${APOLLO_USB_PROFILE:-0}"
+CANDIDATE_PROFILES="$PREFERRED_PROFILE"
+if [ "$PREFERRED_PROFILE" != "1" ]; then
+  CANDIDATE_PROFILES="$CANDIDATE_PROFILES 1"
+fi
 
-# Discover node names (robust against profile naming differences).
-INPUT_NODE="${INPUT_NODE:-}"
-OUTPUT_NODE="${OUTPUT_NODE:-}"
-eval "$(pw-dump 2>/dev/null | python3 -c "
+find_nodes() {
+  local input_node="" output_node=""
+  eval "$(pw-dump 2>/dev/null | python3 -c "
 import json, sys
 in_name = ''
 out_name = ''
@@ -62,9 +62,29 @@ for obj in json.load(sys.stdin):
 print(f'INPUT_NODE=\"{in_name}\"')
 print(f'OUTPUT_NODE=\"{out_name}\"')
 " 2>/dev/null || true)"
+  input_node="${INPUT_NODE:-}"
+  output_node="${OUTPUT_NODE:-}"
+  printf '%s\n%s\n' "$input_node" "$output_node"
+}
 
-[ -z "${INPUT_NODE:-}" ] && { log "Input node not found"; exit 1; }
-[ -z "${OUTPUT_NODE:-}" ] && { log "Output node not found"; exit 1; }
+INPUT_NODE=""
+OUTPUT_NODE=""
+SELECTED_PROFILE=""
+for profile in $CANDIDATE_PROFILES; do
+  wpctl set-profile "$DEVICE_ID" "$profile" 2>/dev/null || true
+  sleep 1
+  mapfile -t _nodes < <(find_nodes)
+  INPUT_NODE="${_nodes[0]:-}"
+  OUTPUT_NODE="${_nodes[1]:-}"
+  if [ -n "$INPUT_NODE" ] && [ -n "$OUTPUT_NODE" ]; then
+    SELECTED_PROFILE="$profile"
+    break
+  fi
+done
+
+[ -z "${INPUT_NODE:-}" ] && { log "Input node not found (tried profiles: $CANDIDATE_PROFILES)"; exit 1; }
+[ -z "${OUTPUT_NODE:-}" ] && { log "Output node not found (tried profiles: $CANDIDATE_PROFILES)"; exit 1; }
+log "Apollo profile set to ${SELECTED_PROFILE:-$PREFERRED_PROFILE}"
 log "Input:  $INPUT_NODE"
 log "Output: $OUTPUT_NODE"
 
