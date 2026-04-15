@@ -166,8 +166,6 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         page.add(mon_grp)
 
-        self._bind_wheel_scroll_capture(page)
-
         clamp = Adw.Clamp()
         clamp.set_maximum_size(560)
         clamp.set_child(page)
@@ -180,6 +178,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll.set_propagate_natural_height(False)
         scroll.set_child(clamp)
         self._scroll = scroll
+        # CAPTURE sur le ScrolledWindow : la molette arrive ici avant les lignes / Scale.
+        self._bind_wheel_scroll_capture(scroll)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -202,12 +202,12 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         GLib.idle_add(self.on_reconnect, None)
 
-    def _bind_wheel_scroll_capture(self, widget: Gtk.Widget) -> None:
-        """Molette : toujours faire défiler le ScrolledWindow (priorité sur les contrôles)."""
+    def _bind_wheel_scroll_capture(self, scroll: Gtk.ScrolledWindow) -> None:
+        """Molette : défiler le viewport avant que les enfants (Scale, rows) ne mangent l’événement."""
         ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl.connect('scroll', self._on_wheel_scroll_capture)
-        widget.add_controller(ctrl)
+        scroll.add_controller(ctrl)
 
     def _on_wheel_scroll_capture(
         self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
@@ -216,8 +216,16 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         if delta == 0:
             return False
         adj = self._scroll.get_vadjustment()
-        step = adj.get_step_increment() * 4
-        new_val = adj.get_value() + delta * step
+        # step_increment du vadjustment est souvent 0 avant/après layout ; forcer des pixels.
+        step = float(adj.get_step_increment())
+        if step < 1.0:
+            step = float(adj.get_page_increment()) or 48.0
+        pixels = step * (1.0 + 2.0 * min(3.0, abs(delta)))
+        if delta < 0:
+            pixels = -pixels
+        if abs(pixels) < 8.0:
+            pixels = 64.0 if delta > 0 else -64.0
+        new_val = adj.get_value() + pixels
         lo = adj.get_lower()
         hi = adj.get_upper() - adj.get_page_size()
         adj.set_value(max(lo, min(hi, new_val)))
