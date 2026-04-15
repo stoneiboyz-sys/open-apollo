@@ -177,6 +177,10 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll.set_kinetic_scrolling(True)
         scroll.set_propagate_natural_height(False)
         scroll.set_child(clamp)
+        self._scroll = scroll
+        self._bind_scale_wheel_scrolls_page(self.gain_0)
+        self._bind_scale_wheel_scrolls_page(self.gain_1)
+        self._bind_scale_wheel_scrolls_page(self.monitor_scale)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -198,6 +202,27 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         self.set_content(self._toast_overlay)
 
         GLib.idle_add(self.on_reconnect, None)
+
+    def _bind_scale_wheel_scrolls_page(self, scale: Gtk.Scale) -> None:
+        """Molette sur les curseurs : fait défiler la page, ne change pas la valeur."""
+        ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
+        ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        ctrl.connect('scroll', self._on_scale_wheel_scroll)
+        scale.add_controller(ctrl)
+
+    def _on_scale_wheel_scroll(
+        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
+    ) -> bool:
+        delta = dy if abs(dy) >= abs(dx) else dx
+        if delta == 0:
+            return False
+        adj = self._scroll.get_vadjustment()
+        step = adj.get_step_increment() * 4
+        new_val = adj.get_value() + delta * step
+        lo = adj.get_lower()
+        hi = adj.get_upper() - adj.get_page_size()
+        adj.set_value(max(lo, min(hi, new_val)))
+        return True
 
     def _toast_usb_error(self, message: str) -> None:
         text = f'USB : {message}'
