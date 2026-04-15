@@ -343,6 +343,11 @@ class ApolloTray:
         self.item_buffer.set_submenu(self.buffer_submenu)
         self.menu.append(self.item_buffer)
 
+        item_usb_mixer = Gtk.MenuItem(label='USB mixer…')
+        item_usb_mixer.connect('activate', self.on_usb_mixer)
+        self.item_usb_mixer = item_usb_mixer
+        self.menu.append(item_usb_mixer)
+
         self.menu.append(Gtk.SeparatorMenuItem())
 
         item_init = Gtk.MenuItem(label='Initialize Apollo…')
@@ -460,6 +465,8 @@ class ApolloTray:
         show_usb_buffer = self._usb_menu_relevant()
         self.item_buffer.set_visible(show_usb_buffer)
         self.item_buffer.set_sensitive(show_usb_buffer)
+        self.item_usb_mixer.set_visible(show_usb_buffer)
+        self.item_usb_mixer.set_sensitive(show_usb_buffer)
         if show_usb_buffer:
             self.sync_buffer_radios()
 
@@ -481,6 +488,16 @@ class ApolloTray:
         )
         dialog.run()
         dialog.destroy()
+
+    def on_usb_mixer(self, _):
+        mixer = os.path.join(REPO_ROOT, 'tools', 'open-apollo-usb-mixer.py')
+        if not os.path.isfile(mixer):
+            self.show_error(f'Not found: {mixer}')
+            return
+        try:
+            subprocess.Popen(['python3', mixer], cwd=REPO_ROOT)
+        except OSError as e:
+            self.show_error(str(e))
 
     def on_usb_buffer_toggled(self, widget, size):
         if self._ignoring_buffer_toggle:

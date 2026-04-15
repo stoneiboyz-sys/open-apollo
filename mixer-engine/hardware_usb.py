@@ -350,6 +350,15 @@ class HardwareUSB:
         log.info("USB MONITOR: mono=%s seq=%d", mono, self._seq + 1)
         self._write_settings(mask_buf)
 
+    def set_monitor_flags(self, muted, mono):
+        """Mute (bit1) and mono (bit0) together — avoids clearing one when toggling the other."""
+        mask_buf = bytearray(128)
+        val = (0x0002 if muted else 0) | (0x0001 if mono else 0)
+        word = self._setting_word(0x0003, val)
+        struct.pack_into("<I", mask_buf, SETTING_MONITOR * 8 + 4, word)
+        log.info("USB MONITOR: mute=%s mono=%s seq=%d", muted, mono, self._seq + 1)
+        self._write_settings(mask_buf)
+
     # ── Vendor control requests ──
 
     def read_device_info(self):
