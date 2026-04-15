@@ -46,6 +46,8 @@ systemctl --user unmask wireplumber pipewire pipewire-pulse || true
 systemctl --user restart pipewire pipewire-pulse wireplumber || true
 
 # Force Apollo card profile when visible (mirrors setup script behavior).
+# Default to stereo profile; override with APOLLO_USB_PROFILE if needed.
+APOLLO_USB_PROFILE="${APOLLO_USB_PROFILE:-0}"
 apollo_dev_id="$(
   pw-dump 2>/dev/null | python3 -c '
 import json, sys
@@ -62,7 +64,7 @@ for obj in objs:
 ' 2>/dev/null || true
 )"
 if [ -n "${apollo_dev_id:-}" ]; then
-  wpctl set-profile "$apollo_dev_id" 1 2>/dev/null || true
+  wpctl set-profile "$apollo_dev_id" "$APOLLO_USB_PROFILE" 2>/dev/null || true
 fi
 
 # Rebuild Apollo loopback mapping when available (keeps apollo_monitor

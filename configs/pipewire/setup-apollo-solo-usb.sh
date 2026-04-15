@@ -34,11 +34,12 @@ for obj in json.load(sys.stdin):
 [ -z "$DEVICE_ID" ] && { log "Apollo Solo USB not found in PipeWire"; exit 1; }
 log "Device ID: $DEVICE_ID"
 
-# Use analog surround 2.1 profile (pro-audio has PipeWire capture start bug)
-# Profile 1 = analog-surround-21 output + input (3ch: FL, FR, LFE)
-wpctl set-profile "$DEVICE_ID" 1 2>/dev/null || true
+# Use a stereo profile by default (avoid LFE/capture quirks on WebRTC apps).
+# Override with APOLLO_USB_PROFILE if needed.
+APOLLO_USB_PROFILE="${APOLLO_USB_PROFILE:-0}"
+wpctl set-profile "$DEVICE_ID" "$APOLLO_USB_PROFILE" 2>/dev/null || true
 sleep 1
-log "Analog surround 2.1 profile set"
+log "Apollo profile set to $APOLLO_USB_PROFILE"
 
 # Discover node names
 eval "$(pw-dump 2>/dev/null | python3 -c "
@@ -67,7 +68,7 @@ cat > "$CONF_FILE" << CONF
 context.modules = [
 
     # ═══════ CAPTURE SOURCES (Apollo → PipeWire) ═══════
-    # Analog surround 2.1: FL=Mic1, FR=Mic2, LFE=?
+    # Stereo capture: FL=Mic1, FR=Mic2
 
     # Mic/Instrument 1 (mono)
     { name = libpipewire-module-loopback
@@ -124,7 +125,7 @@ context.modules = [
     }
 
     # ═══════ PLAYBACK SINKS (PipeWire → Apollo) ═══════
-    # Analog surround 2.1: FL=MonL, FR=MonR, LFE=?
+    # Stereo playback: FL=MonL, FR=MonR
 
     # Monitor L/R (main speakers)
     { name = libpipewire-module-loopback
