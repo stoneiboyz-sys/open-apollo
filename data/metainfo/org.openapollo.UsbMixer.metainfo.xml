@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.openapollo.UsbMixer</id>
+  <name>Open Apollo USB Mixer</name>
+  <developer id="org.openapollo">
+    <name>Open Apollo contributors</name>
+  </developer>
+  <summary>Headphone monitor and preamp controls for Apollo Solo USB</summary>
+  <description>
+    <p>
+      Standalone Libadwaita utility for Universal Audio Apollo Solo USB. Adjusts
+      phantom power, mic/line, gain, experimental PAD/low-cut bits, and Apollo
+      headphone monitor level over USB control transfers on the default endpoint
+      (EP0) so PipeWire and ALSA keep using the device normally.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.openapollo.UsbMixer.desktop</launchable>
+  <url type="homepage">https://github.com/stoneiboyz-sys/open-apollo</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-only</project_license>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </recommends>
+</component>

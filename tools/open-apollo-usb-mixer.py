@@ -15,7 +15,8 @@ Requires: pyusb, python3-gi, GTK 4, Libadwaita (gir1.2-gtk-4.0, gir1.2-adw-1).
 USB access: plugdev/udev or run with sudo if needed.
 """
 
-import struct
+from __future__ import annotations
+
 import sys
 
 import gi
@@ -26,104 +27,12 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 try:
     import usb.core
-    import usb.util
 except ImportError:
     print('Install pyusb: pip install pyusb', file=sys.stderr)
     sys.exit(1)
 
-UA_VID = 0x2B5A
-SOLO_PID = 0x000D
-
-SETTINGS_SEQ = 0x0602
-SETTINGS_MASK = 0x062D
-SETTINGS_VALUES = 0x064F
-
-SETTING_PREAMP_CH0 = 0
-SETTING_PREAMP_CH1 = 1
-SETTING_MONITOR = 2
-SETTING_GAIN_C = 3
-
-
-def setting_word(mask, value):
-    return ((mask & 0xFFFF) << 16) | (value & 0xFFFF)
-
-
-class VendorMixer:
-    """EP0-only mixer writes (do not claim interface 0 — snd_usb_audio stays attached)."""
-
-    def __init__(self):
-        self.dev = None
-        self.seq = 7
-
-    def find(self):
-        self.dev = usb.core.find(idVendor=UA_VID, idProduct=SOLO_PID)
-        return self.dev is not None
-
-    def _vendor_write(self, request, wvalue, data=b''):
-        self.dev.ctrl_transfer(0x41, request, wvalue, 0, data, timeout=1000)
-
-    def write_settings(self, mask_buf, value_buf=None):
-        self._vendor_write(0x03, SETTINGS_MASK, mask_buf)
-        if value_buf and any(b != 0 for b in value_buf):
-            self._vendor_write(0x03, SETTINGS_VALUES, value_buf)
-        self._vendor_write(0x03, SETTINGS_SEQ, struct.pack('<I', self.seq))
-        self.seq += 1
-
-    def set_phantom(self, channel, enabled):
-        off = (SETTING_PREAMP_CH0 + channel) * 8
-        mask_buf = bytearray(128)
-        val = 0x0008 if enabled else 0x0000
-        struct.pack_into('<I', mask_buf, off, setting_word(0x0008, val))
-        self.write_settings(mask_buf)
-
-    def set_mic_line(self, channel, line_mode):
-        off = (SETTING_PREAMP_CH0 + channel) * 8
-        mask_buf = bytearray(128)
-        val = 0x0001 if line_mode else 0x0000
-        struct.pack_into('<I', mask_buf, off, setting_word(0x0001, val))
-        self.write_settings(mask_buf)
-
-    def set_pad(self, channel, enabled):
-        """Inferred PAD on bit1 (mask 0x0002) — verify on hardware."""
-        off = (SETTING_PREAMP_CH0 + channel) * 8
-        mask_buf = bytearray(128)
-        val = 0x0002 if enabled else 0x0000
-        struct.pack_into('<I', mask_buf, off, setting_word(0x0002, val))
-        self.write_settings(mask_buf)
-
-    def set_low_cut(self, channel, enabled):
-        """Inferred low-cut on bit4 (mask 0x0010) — verify on hardware."""
-        off = (SETTING_PREAMP_CH0 + channel) * 8
-        mask_buf = bytearray(128)
-        val = 0x0010 if enabled else 0x0000
-        struct.pack_into('<I', mask_buf, off, setting_word(0x0010, val))
-        self.write_settings(mask_buf)
-
-    def set_monitor_db(self, level_db):
-        raw = max(0, min(0xC0, int(192 + float(level_db) * 2)))
-        mask_buf = bytearray(128)
-        struct.pack_into('<I', mask_buf, SETTING_MONITOR * 8, setting_word(0x00FF, raw))
-        self.write_settings(mask_buf)
-
-    def set_monitor_flags(self, muted, mono):
-        """Mute (bit1) and mono (bit0) share wordB — must be written in one shot."""
-        mask_buf = bytearray(128)
-        val = (0x0002 if muted else 0) | (0x0001 if mono else 0)
-        struct.pack_into(
-            '<I', mask_buf, SETTING_MONITOR * 8 + 4, setting_word(0x0003, val)
-        )
-        self.write_settings(mask_buf)
-
-    def set_preamp_gain_db(self, channel, gain_db):
-        gain_db = int(round(float(gain_db)))
-        val_a = max(0, min(54, gain_db - 10))
-        val_c = val_a + 0x41
-        mask_buf = bytearray(128)
-        value_buf = bytearray(128)
-        off = (SETTING_PREAMP_CH0 + channel) * 8
-        struct.pack_into('<I', value_buf, off, setting_word(0x00FF, val_a))
-        struct.pack_into('<I', mask_buf, SETTING_GAIN_C * 8, setting_word(0x003F, val_c))
-        self.write_settings(mask_buf, value_buf)
+from open_apollo import APP_ID_USB_MIXER
+from open_apollo.solo_usb_vendor_mixer import VendorEp0Mixer
 
 
 class SoloUsbMixerWindow(Adw.ApplicationWindow):
@@ -131,8 +40,10 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         self.set_title('Open Apollo — Solo USB mixer')
         self.set_default_size(480, 620)
-        self.mix = VendorMixer()
+        self.mix = VendorEp0Mixer()
         self._connected = False
+
+        self._toast_overlay = Adw.ToastOverlay()
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
@@ -274,14 +185,21 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         outer.append(note)
 
         toolbar.set_content(outer)
-        self.set_content(toolbar)
+        self._toast_overlay.set_child(toolbar)
+        self.set_content(self._toast_overlay)
 
         GLib.idle_add(self.on_reconnect, None)
 
-    def _guard(self):
-        if not self._connected:
-            return False
-        return True
+    def _toast_usb_error(self, message: str) -> None:
+        text = f'USB : {message}'
+        if len(text) > 200:
+            text = text[:197] + '…'
+        toast = Adw.Toast.new(text)
+        toast.set_timeout(6)
+        self._toast_overlay.add_toast(toast)
+
+    def _guard(self) -> bool:
+        return self._connected
 
     def on_reconnect(self, _widget=None):
         try:
@@ -299,23 +217,13 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
             self.status.set_label(f'USB: {e}\n(Essaye sudo ou règles udev plugdev.)')
         return False
 
-    def _show_usb_error(self, message: str):
-        dlg = Gtk.MessageDialog(
-            transient_for=self,
-            message_type=Gtk.MessageType.ERROR,
-            buttons=Gtk.ButtonsType.OK,
-            text=message,
-        )
-        dlg.connect('response', lambda d, *_: d.destroy())
-        dlg.present()
-
     def _apply(self, fn, *args):
         if not self._guard():
             return
         try:
             fn(*args)
         except usb.core.USBError as e:
-            self._show_usb_error(str(e))
+            self._toast_usb_error(str(e))
 
     def _mk_phantom_sw(self, row, _pspec, ch):
         self._apply(self.mix.set_phantom, ch, row.get_active())
@@ -346,10 +254,14 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 class OpenApolloUsbMixerApp(Adw.Application):
     def __init__(self):
         super().__init__(
-            application_id='org.openapollo.UsbMixer',
+            application_id=APP_ID_USB_MIXER,
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
         )
-        self._win = None
+        self._win: SoloUsbMixerWindow | None = None
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.DEFAULT)
 
     def do_activate(self):
         if self._win is None:

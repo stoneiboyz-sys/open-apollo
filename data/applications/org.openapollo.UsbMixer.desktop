@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Open Apollo USB Mixer
+GenericName=Apollo Solo USB mixer
+Comment=Preamp, phantom, PAD, low-cut, and headphone monitor (vendor EP0; PipeWire-safe)
+Categories=AudioVideo;Audio;Mixer;
+Keywords=Apollo;Universal Audio;USB;preamp;monitor;PipeWire;
+Icon=multimedia-volume-control
+# Set Path to your clone root, then Exec is relative to Path (freedesktop.org spec).
+Path=/CHANGE_ME_TO_OPEN_APOLLO_REPO_ROOT
+Exec=python3 tools/open-apollo-usb-mixer.py
+Terminal=false
+StartupNotify=true

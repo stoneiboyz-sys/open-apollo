@@ -13,9 +13,12 @@ Tray: gir1.2-appindicator3-0.1 (Ubuntu) ou libappindicator-gtk3 (Fedora).
 Mixer: gir1.2-gtk-4.0 + gir1.2-adw-1 (Ubuntu) ou gtk4 + libadwaita (Fedora).
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
+import sys
 import shutil
 import signal
 import struct
@@ -25,7 +28,9 @@ import subprocess
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('AppIndicator3', '0.1')
-from gi.repository import Gtk, GLib, AppIndicator3
+from gi.repository import AppIndicator3, Gio, GLib, Gtk
+
+from open_apollo import APP_ID_TRAY
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -292,7 +297,8 @@ def write_usb_period_size(new_size: int):
 class ApolloTray:
     """System tray indicator for Open Apollo."""
 
-    def __init__(self):
+    def __init__(self, application: Gtk.Application):
+        self._application = application
         self.state = ApolloState()
         self.usb_state = UsbAudioState()
         self._ignoring_buffer_toggle = False
@@ -485,14 +491,16 @@ class ApolloTray:
             self.show_error(f'Failed to run command: {e}')
 
     def show_error(self, msg):
-        """Show a simple error dialog."""
+        """Show a non-blocking error dialog (no nested main loop)."""
         dialog = Gtk.MessageDialog(
+            transient_for=None,
+            flags=0,
             message_type=Gtk.MessageType.ERROR,
             buttons=Gtk.ButtonsType.OK,
-            text=msg
+            text=msg,
         )
-        dialog.run()
-        dialog.destroy()
+        dialog.connect('response', lambda d, *_: d.destroy())
+        dialog.show()
 
     def on_usb_mixer(self, _):
         mixer = os.path.join(REPO_ROOT, 'tools', 'open-apollo-usb-mixer.py')
@@ -547,14 +555,38 @@ class ApolloTray:
             self.show_error(f'Log not found: {DAEMON_LOG}')
 
     def on_quit(self, _):
-        Gtk.main_quit()
+        self._application.quit()
+
+
+class OpenApolloTrayApp(Gtk.Application):
+    """GTK application shell for the tray (hold/release lifecycle)."""
+
+    def __init__(self):
+        super().__init__(
+            application_id=APP_ID_TRAY,
+            flags=Gio.ApplicationFlags.FLAGS_NONE,
+        )
+        self._tray: ApolloTray | None = None
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        self._tray = ApolloTray(self)
+        self.hold()
+
+    def do_activate(self):
+        # Unique app: secondary launches only hit activate on the primary instance.
+        pass
+
+    def do_shutdown(self):
+        self._tray = None
+        self.release()
+        Gtk.Application.do_shutdown(self)
 
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)  # Allow Ctrl+C
-    ApolloTray()
-    Gtk.main()
+    return OpenApolloTrayApp().run(sys.argv)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main() or 0)
