@@ -39,17 +39,23 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.set_title('Open Apollo — Solo USB mixer')
-        self.set_default_size(480, 620)
+        self.set_default_size(480, 680)
         self.mix = VendorEp0Mixer()
         self._connected = False
 
         self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_vexpand(True)
+        self._toast_overlay.set_hexpand(True)
 
         toolbar = Adw.ToolbarView()
+        toolbar.set_vexpand(True)
+        toolbar.set_hexpand(True)
         header = Adw.HeaderBar()
         toolbar.add_top_bar(header)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.set_vexpand(True)
+        outer.set_hexpand(True)
 
         status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         status_box.set_margin_start(18)
@@ -167,6 +173,9 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
+        scroll.set_hexpand(True)
+        scroll.set_kinetic_scrolling(True)
+        scroll.set_propagate_natural_height(False)
         scroll.set_child(clamp)
         outer.append(scroll)
 
