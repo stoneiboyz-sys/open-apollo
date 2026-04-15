@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GTK mixer for Apollo Solo USB (vendor control on EP0 — no USB interface claim).
+"""GTK 4 / Libadwaita mixer for Apollo Solo USB (vendor control on EP0 — no USB interface claim).
 
 Controls preamp / monitor paths using the same 0x03 batch protocol as
 tools/usb-mixer-test.py and mixer-engine/hardware_usb.py. PipeWire keeps working.
@@ -11,7 +11,8 @@ capture — 48V / Mic-Line / monitor level are the best-tested paths.
 Usage:
   python3 tools/open-apollo-usb-mixer.py
 
-Requires: pyusb, python3-gi (GTK 3). USB access: plugdev/udev or run with sudo if needed.
+Requires: pyusb, python3-gi, GTK 4, Libadwaita (gir1.2-gtk-4.0, gir1.2-adw-1).
+USB access: plugdev/udev or run with sudo if needed.
 """
 
 import struct
@@ -19,8 +20,9 @@ import sys
 
 import gi
 
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gio, GLib, Gtk
 
 try:
     import usb.core
@@ -124,98 +126,155 @@ class VendorMixer:
         self.write_settings(mask_buf, value_buf)
 
 
-class SoloUsbMixerWindow(Gtk.Window):
-    def __init__(self):
-        super().__init__(title='Open Apollo — Solo USB mixer')
-        self.set_default_size(420, 520)
+class SoloUsbMixerWindow(Adw.ApplicationWindow):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.set_title('Open Apollo — Solo USB mixer')
+        self.set_default_size(480, 620)
         self.mix = VendorMixer()
         self._connected = False
 
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        root.set_margin_start(12)
-        root.set_margin_end(12)
-        root.set_margin_top(12)
-        root.set_margin_bottom(12)
-        self.add(root)
+        toolbar = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        toolbar.add_top_bar(header)
 
-        self.status = Gtk.Label(label='Non connecté — branche l’Apollo Solo USB (USB 3).')
-        self.status.set_line_wrap(True)
-        root.pack_start(self.status, False, False, 0)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
+        status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        status_box.set_margin_start(18)
+        status_box.set_margin_end(18)
+        status_box.set_margin_top(14)
+        self.status = Gtk.Label(
+            label='Non connecté — branche l’Apollo Solo USB (USB 3).',
+            xalign=0.0,
+        )
+        self.status.set_wrap(True)
+        self.status.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         btn = Gtk.Button(label='Reconnecter')
         btn.connect('clicked', self.on_reconnect)
-        root.pack_start(btn, False, False, 0)
+        status_box.append(self.status)
+        status_box.append(btn)
+        outer.append(status_box)
 
-        # --- Preamps ---
+        page = Adw.PreferencesPage()
+
         for ch in (0, 1):
-            f = Gtk.Frame(label=f'Entrée {ch + 1}')
-            vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            f.add(vb)
+            grp = Adw.PreferencesGroup(title=f'Entrée {ch + 1}')
+            sw48 = Adw.SwitchRow(title='48 V phantom')
+            sw48.connect('notify::active', self._mk_phantom_sw, ch)
+            grp.add(sw48)
+            setattr(self, f'phantom_{ch}', sw48)
 
-            g48 = Gtk.CheckButton(label='48 V phantom')
-            g48.connect('toggled', self._mk_phantom, ch)
-            vb.pack_start(g48, False, False, 0)
-            setattr(self, f'phantom_{ch}', g48)
+            swline = Adw.SwitchRow(title='Entrée ligne (sinon micro)')
+            swline.connect('notify::active', self._mk_line_sw, ch)
+            grp.add(swline)
+            setattr(self, f'line_{ch}', swline)
 
-            gml = Gtk.CheckButton(label='Entrée ligne (sinon micro)')
-            gml.connect('toggled', self._mk_line, ch)
-            vb.pack_start(gml, False, False, 0)
-            setattr(self, f'line_{ch}', gml)
+            swpad = Adw.SwitchRow(
+                title='PAD (atténuation)',
+                subtitle='Bit expérimental — à valider sur ta carte',
+            )
+            swpad.connect('notify::active', self._mk_pad_sw, ch)
+            grp.add(swpad)
+            setattr(self, f'pad_{ch}', swpad)
 
-            gpad = Gtk.CheckButton(label='PAD (atténuation) — bit expérimental')
-            gpad.connect('toggled', self._mk_pad, ch)
-            vb.pack_start(gpad, False, False, 0)
-            setattr(self, f'pad_{ch}', gpad)
+            swlc = Adw.SwitchRow(
+                title='Low-cut (passe-haut)',
+                subtitle='Bit expérimental — à valider sur ta carte',
+            )
+            swlc.connect('notify::active', self._mk_lowcut_sw, ch)
+            grp.add(swlc)
+            setattr(self, f'lowcut_{ch}', swlc)
 
-            glc = Gtk.CheckButton(label='Low-cut (passe-haut) — bit expérimental')
-            glc.connect('toggled', self._mk_lowcut, ch)
-            vb.pack_start(glc, False, False, 0)
-            setattr(self, f'lowcut_{ch}', glc)
-
-            adj = Gtk.Adjustment(value=30, lower=10, upper=60, step_increment=1, page_increment=5, page_size=0)
-            sc = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj)
+            adj = Gtk.Adjustment(
+                value=30,
+                lower=10,
+                upper=60,
+                step_increment=1,
+                page_increment=5,
+                page_size=0,
+            )
+            sc = Gtk.Scale(
+                orientation=Gtk.Orientation.HORIZONTAL,
+                adjustment=adj,
+            )
             sc.set_digits(0)
+            sc.set_draw_value(True)
+            sc.set_hexpand(True)
+            sc.set_width_request(200)
             sc.add_mark(10, Gtk.PositionType.BOTTOM, '10')
             sc.add_mark(60, Gtk.PositionType.BOTTOM, '60')
             sc.connect('value-changed', self._mk_gain, ch)
-            vb.pack_start(Gtk.Label(label='Gain preamp (dB)'), False, False, 0)
-            vb.pack_start(sc, False, False, 0)
+            gain_row = Adw.ActionRow(title='Gain preamp (dB)')
+            gain_row.add_suffix(sc)
+            gain_row.set_activatable(False)
+            grp.add(gain_row)
             setattr(self, f'gain_{ch}', sc)
 
-            root.pack_start(f, False, False, 0)
+            page.add(grp)
 
-        # --- Monitor (casque / mix micro + lecture) ---
-        mon = Gtk.Frame(label='Monitor — casque (volume du retour, pas le master DAW)')
-        mv = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        mon.add(mv)
-
-        madj = Gtk.Adjustment(value=-12, lower=-96, upper=0, step_increment=1, page_increment=6, page_size=0)
+        mon_grp = Adw.PreferencesGroup(
+            title='Monitor — casque',
+            description='Volume du retour Apollo (pas le master DAW).',
+        )
+        madj = Gtk.Adjustment(
+            value=-12,
+            lower=-96,
+            upper=0,
+            step_increment=1,
+            page_increment=6,
+            page_size=0,
+        )
         msc = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=madj)
         msc.set_digits(0)
+        msc.set_draw_value(True)
+        msc.set_hexpand(True)
+        msc.set_width_request(200)
         msc.connect('value-changed', self._on_monitor_db)
-        mv.pack_start(Gtk.Label(label='Niveau monitor (dB)'), False, False, 0)
-        mv.pack_start(msc, False, False, 0)
+        mon_row = Adw.ActionRow(title='Niveau monitor (dB)')
+        mon_row.add_suffix(msc)
+        mon_row.set_activatable(False)
+        mon_grp.add(mon_row)
         self.monitor_scale = msc
 
-        gmute = Gtk.CheckButton(label='Muet')
-        gmute.connect('toggled', self._on_monitor_mute_mono)
-        mv.pack_start(gmute, False, False, 0)
-        self.monitor_mute = gmute
+        sw_mute = Adw.SwitchRow(title='Muet')
+        sw_mute.connect('notify::active', self._on_monitor_mute_mono)
+        mon_grp.add(sw_mute)
+        self.monitor_mute = sw_mute
 
-        gmono = Gtk.CheckButton(label='Mono')
-        gmono.connect('toggled', self._on_monitor_mute_mono)
-        mv.pack_start(gmono, False, False, 0)
-        self.monitor_mono = gmono
+        sw_mono = Adw.SwitchRow(title='Mono')
+        sw_mono.connect('notify::active', self._on_monitor_mute_mono)
+        mon_grp.add(sw_mono)
+        self.monitor_mono = sw_mono
 
-        root.pack_start(mon, False, False, 0)
+        page.add(mon_grp)
+
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(560)
+        clamp.set_child(page)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(clamp)
+        outer.append(scroll)
 
         note = Gtk.Label(
             label='Le bus master du DAW (là où tout le mix part à la fin) ne se règle pas ici.\n'
-            'Cette fenêtre ne fait que le monitor Apollo (casque / retour micro + lecture).'
+            'Cette fenêtre ne fait que le monitor Apollo (casque / retour micro + lecture).',
+            xalign=0.0,
         )
-        note.set_line_wrap(True)
-        note.get_style_context().add_class('dim-label')
-        root.pack_start(note, False, False, 0)
+        note.set_wrap(True)
+        note.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        note.add_css_class('dim-label')
+        note.set_margin_start(18)
+        note.set_margin_end(18)
+        note.set_margin_top(10)
+        note.set_margin_bottom(14)
+        outer.append(note)
+
+        toolbar.set_content(outer)
+        self.set_content(toolbar)
 
         GLib.idle_add(self.on_reconnect, None)
 
@@ -240,33 +299,35 @@ class SoloUsbMixerWindow(Gtk.Window):
             self.status.set_label(f'USB: {e}\n(Essaye sudo ou règles udev plugdev.)')
         return False
 
+    def _show_usb_error(self, message: str):
+        dlg = Gtk.MessageDialog(
+            transient_for=self,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.OK,
+            text=message,
+        )
+        dlg.connect('response', lambda d, *_: d.destroy())
+        dlg.present()
+
     def _apply(self, fn, *args):
         if not self._guard():
             return
         try:
             fn(*args)
         except usb.core.USBError as e:
-            dlg = Gtk.MessageDialog(
-                transient_for=self,
-                flags=0,
-                message_type=Gtk.MessageType.ERROR,
-                buttons=Gtk.ButtonsType.OK,
-                text=str(e),
-            )
-            dlg.run()
-            dlg.destroy()
+            self._show_usb_error(str(e))
 
-    def _mk_phantom(self, w, ch):
-        self._apply(self.mix.set_phantom, ch, w.get_active())
+    def _mk_phantom_sw(self, row, _pspec, ch):
+        self._apply(self.mix.set_phantom, ch, row.get_active())
 
-    def _mk_line(self, w, ch):
-        self._apply(self.mix.set_mic_line, ch, w.get_active())
+    def _mk_line_sw(self, row, _pspec, ch):
+        self._apply(self.mix.set_mic_line, ch, row.get_active())
 
-    def _mk_pad(self, w, ch):
-        self._apply(self.mix.set_pad, ch, w.get_active())
+    def _mk_pad_sw(self, row, _pspec, ch):
+        self._apply(self.mix.set_pad, ch, row.get_active())
 
-    def _mk_lowcut(self, w, ch):
-        self._apply(self.mix.set_low_cut, ch, w.get_active())
+    def _mk_lowcut_sw(self, row, _pspec, ch):
+        self._apply(self.mix.set_low_cut, ch, row.get_active())
 
     def _mk_gain(self, w, ch):
         self._apply(self.mix.set_preamp_gain_db, ch, w.get_value())
@@ -274,7 +335,7 @@ class SoloUsbMixerWindow(Gtk.Window):
     def _on_monitor_db(self, w):
         self._apply(self.mix.set_monitor_db, w.get_value())
 
-    def _on_monitor_mute_mono(self, _w=None):
+    def _on_monitor_mute_mono(self, *_args):
         self._apply(
             self.mix.set_monitor_flags,
             self.monitor_mute.get_active(),
@@ -282,12 +343,23 @@ class SoloUsbMixerWindow(Gtk.Window):
         )
 
 
+class OpenApolloUsbMixerApp(Adw.Application):
+    def __init__(self):
+        super().__init__(
+            application_id='org.openapollo.UsbMixer',
+            flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
+        )
+        self._win = None
+
+    def do_activate(self):
+        if self._win is None:
+            self._win = SoloUsbMixerWindow(application=self)
+        self._win.present()
+
+
 def main():
-    w = SoloUsbMixerWindow()
-    w.connect('destroy', Gtk.main_quit)
-    w.show_all()
-    Gtk.main()
+    return OpenApolloUsbMixerApp().run(sys.argv)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

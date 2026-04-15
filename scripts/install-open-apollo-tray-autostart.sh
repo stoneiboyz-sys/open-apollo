@@ -4,7 +4,8 @@
 # Use when AppIndicator was installed *after* install-usb.sh (tray was skipped),
 # or to repair a missing ~/.config/autostart entry.
 #
-# Requires: python3-gi, gir1.2-gtk-3.0, gir1.2-appindicator3-0.1 (Ubuntu)
+# Requires: python3-gi, gir1.2-gtk-3.0, gir1.2-appindicator3-0.1 (Ubuntu) for the tray.
+# USB mixer window: gir1.2-gtk-4.0 + gir1.2-adw-1 (optional here; install-usb.sh pulls them).
 #
 # Usage:
 #   bash scripts/install-open-apollo-tray-autostart.sh
@@ -28,6 +29,12 @@ if ! python3 -c "import gi; gi.require_version('Gtk','3.0'); gi.require_version(
     echo "ERROR: GTK / AppIndicator Python bindings missing." >&2
     echo "  Ubuntu: sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1" >&2
     exit 1
+fi
+
+if ! python3 -c "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1')" 2>/dev/null; then
+    echo "NOTE: GTK 4 / Libadwaita not found — menu « USB mixer… » may fail until you install:" >&2
+    echo "  Ubuntu: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1" >&2
+    echo "  Fedora: sudo dnf install gtk4 libadwaita python3-gobject" >&2
 fi
 
 mkdir -p "$AUTOSTART_DIR"

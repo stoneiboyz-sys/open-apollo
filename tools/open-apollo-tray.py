@@ -5,7 +5,12 @@ Thunderbolt: hardware + daemon status, init, PipeWire profile reload.
 USB (Apollo Solo USB): plug-in / PipeWire readiness + ALSA period (buffer)
 from the WirePlumber drop-in (53-apollo-solo-usb-performance.lua).
 
-Dependencies: gir1.2-appindicator3-0.1 (Ubuntu) or libappindicator-gtk3 (Fedora)
+This process stays on **GTK 3 + AppIndicator** (menus de la zone de notification
+n’ont pas d’équivalent GTK 4 stable partout). La fenêtre **USB mixer** lancée
+depuis le menu est **`open-apollo-usb-mixer.py`** (**GTK 4 + Libadwaita**).
+
+Tray: gir1.2-appindicator3-0.1 (Ubuntu) ou libappindicator-gtk3 (Fedora).
+Mixer: gir1.2-gtk-4.0 + gir1.2-adw-1 (Ubuntu) ou gtk4 + libadwaita (Fedora).
 """
 
 import json

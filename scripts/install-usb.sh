@@ -1238,6 +1238,29 @@ then
     run_sudo dnf install -y gtk3 libappindicator-gtk3 python3-gobject 2>/dev/null || true
 fi
 
+# GTK 4 + Libadwaita (standalone USB mixer — tools/open-apollo-usb-mixer.py)
+if [ "$PKG_MGR" = "apt" ] && ! sudo -u "$REAL_USER" -H python3 -c \
+    "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1')" \
+    2>/dev/null
+then
+    info "Installing optional GTK4/Libadwaita packages (USB mixer window)…"
+    run_sudo apt-get install -y -qq python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 2>/dev/null || true
+fi
+if [ "$PKG_MGR" = "dnf" ] && ! sudo -u "$REAL_USER" -H python3 -c \
+    "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1')" \
+    2>/dev/null
+then
+    info "Installing optional GTK4/Libadwaita packages (USB mixer window)…"
+    run_sudo dnf install -y gtk4 libadwaita python3-gobject 2>/dev/null || true
+fi
+if [ "$PKG_MGR" = "pacman" ] && ! sudo -u "$REAL_USER" -H python3 -c \
+    "import gi; gi.require_version('Gtk','4.0'); gi.require_version('Adw','1')" \
+    2>/dev/null
+then
+    info "Installing optional GTK4/Libadwaita packages (USB mixer window)…"
+    run_sudo pacman -S --needed --noconfirm gtk4 libadwaita python-gobject 2>/dev/null || true
+fi
+
 TRAY_INSTALLER="$PROJECT_DIR/scripts/install-open-apollo-tray-autostart.sh"
 if [ -f "$TRAY_INSTALLER" ] && sudo -u "$REAL_USER" -H \
     HOME="$REAL_HOME" \
