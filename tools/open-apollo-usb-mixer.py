@@ -179,8 +179,10 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         scroll.set_min_content_height(200)
         scroll.set_child(clamp)
         self._scroll = scroll
-        # Un seul contrôleur, en tête du ScrolledWindow : la molette ne descend jamais jusqu’aux Gtk.Scale.
-        self._bind_wheel_scroll_scrolled_window_prepend(scroll)
+        # Ne pas intercepter sur le ScrolledWindow : ça casse le défilement natif. On ne bloque
+        # la molette que sur les Gtk.Scale (prepend = avant Gtk.Range).
+        for scale in (self.gain_0, self.gain_1, self.monitor_scale):
+            self._bind_scale_wheel_scroll_only(scale)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -203,40 +205,33 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
         GLib.idle_add(self.on_reconnect, None)
 
-    def _bind_wheel_scroll_scrolled_window_prepend(self, scroll: Gtk.ScrolledWindow) -> None:
-        """Un contrôleur CAPTURE en tête du ScrolledWindow : avant tout le contenu (dont Gtk.Scale)."""
+    def _bind_scale_wheel_scroll_only(self, scale: Gtk.Scale) -> None:
+        """Sur le curseur uniquement : molette = défile la liste, pas la valeur (CAPTURE + prepend)."""
         ctrl = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
             | Gtk.EventControllerScrollFlags.HORIZONTAL
         )
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        ctrl.connect('scroll', self._on_scrolled_window_wheel_capture)
-        if hasattr(scroll, 'prepend_controller'):
-            scroll.prepend_controller(ctrl)
+        ctrl.connect('scroll', self._on_scale_wheel_capture)
+        if hasattr(scale, 'prepend_controller'):
+            scale.prepend_controller(ctrl)
         else:
-            scroll.add_controller(ctrl)
+            scale.add_controller(ctrl)
 
-    def _wheel_scroll_viewport(self, dx: float, dy: float) -> None:
-        delta = dy if abs(dy) >= abs(dx) else dx
-        if abs(delta) < 1e-6:
-            return
+    def _on_scale_wheel_capture(
+        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
+    ) -> bool:
+        u = dy if abs(dy) >= abs(dx) else dx
+        if abs(u) < 1e-6:
+            return False
         adj = self._scroll.get_vadjustment()
         lo = adj.get_lower()
         hi = adj.get_upper() - adj.get_page_size()
-        if hi <= lo + 0.5:
-            return
-        pixels = 72.0 * float(delta)
-        new_val = adj.get_value() + pixels
-        adj.set_value(max(lo, min(hi, new_val)))
-
-    def _on_scrolled_window_wheel_capture(
-        self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
-    ) -> bool:
-        delta = dy if abs(dy) >= abs(dx) else dx
-        if abs(delta) < 1e-6:
-            return False
-        self._wheel_scroll_viewport(dx, dy)
-        # Toujours True : la molette ne doit pas atteindre Gtk.Range (curseurs horizontaux).
+        # Déplacement fixe en px (les deltas « lisses » peuvent être très petits).
+        step = 80.0 if u > 0 else -80.0
+        if hi > lo + 0.5:
+            adj.set_value(max(lo, min(hi, adj.get_value() + step)))
+        # Toujours consommer : Gtk.Range ne doit pas ajuster le gain / monitor.
         return True
 
     def _toast_usb_error(self, message: str) -> None:
