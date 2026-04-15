@@ -105,4 +105,31 @@ for _ in {1..180}; do
   sleep 1
 done
 
+# Choose capture source for voice apps (Discord/WebRTC/browser):
+# prefer the dedicated virtual source (apollo_mic_1), avoid raw 2.1/LFE capture.
+for _ in {1..180}; do
+  source=""
+  if wpctl status 2>/dev/null | awk '/Apollo Solo USB[[:space:]]+\[alsa\]/{found=1} END{exit(found?0:1)}'; then
+    source="$(
+      pactl list short sources 2>/dev/null | awk '
+        $2 == "apollo_mic_1" {print $2; exit}
+      ' || true
+    )"
+  fi
+  if [ -z "${source:-}" ]; then
+    source="$(
+      pactl list short sources 2>/dev/null | awk '
+        $2 == "apollo_mic_stereo" {print $2; exit}
+      ' || true
+    )"
+  fi
+  if [ -n "${source:-}" ]; then
+    pactl set-default-source "$source" || true
+    pactl set-source-mute "$source" 0 || true
+    pactl set-source-volume "$source" 100% || true
+    break
+  fi
+  sleep 1
+done
+
 exit 0
