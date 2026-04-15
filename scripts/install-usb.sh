@@ -857,7 +857,7 @@ patch('$SRC/endpoint.c',
 #
 # NOTE on symbol names: the struct type is 'usb_audio_quirk_flags_table'
 # (prefixed, plural) and the array is 'quirk_flags_table' (plural) —
-# verified across kernels v6.1, v6.6, v6.17, and master.  The earlier
+# verified across kernels v6.1, v6.6, v6.17, and mainline.  The earlier
 # regex used singular 'quirk_flag_table' for both, which matched nothing
 # and silently skipped the patch.  DEVICE_FLG() is the canonical macro.
 patch('$SRC/quirks.c',
