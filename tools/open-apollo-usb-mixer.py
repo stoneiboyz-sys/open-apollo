@@ -76,6 +76,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         page = Adw.PreferencesPage()
         # Sections où la molette doit défiler (attachées après création du ScrolledWindow).
         wheel_targets: list[Gtk.Widget] = []
+        # Lignes « Gain » / « Niveau monitor » : intercepter avant le Gtk.Scale suffixe.
+        wheel_action_rows: list[Gtk.Widget] = []
 
         for ch in (0, 1):
             grp = Adw.PreferencesGroup(title=f'Entrée {ch + 1}')
@@ -129,6 +131,7 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
             gain_row.set_activatable(False)
             grp.add(gain_row)
             setattr(self, f'gain_{ch}', sc)
+            wheel_action_rows.append(gain_row)
 
             page.add(grp)
             wheel_targets.append(grp)
@@ -156,6 +159,7 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         mon_row.set_activatable(False)
         mon_grp.add(mon_row)
         self.monitor_scale = msc
+        wheel_action_rows.append(mon_row)
 
         sw_mute = Adw.SwitchRow(title='Muet')
         sw_mute.connect('notify::active', self._on_monitor_mute_mono)
@@ -185,9 +189,8 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
         self._scroll = scroll
         for target in wheel_targets:
             self._bind_wheel_scroll_capture(target)
-        # Sur le curseur lui-même, Gtk.Range capte la molette avant l’ancêtre PreferencesGroup.
-        for scale in (self.gain_0, self.gain_1, self.monitor_scale):
-            self._bind_scale_wheel_scroll_only(scale)
+        for row in wheel_action_rows:
+            self._bind_wheel_scroll_row_prepend(row)
         outer.append(scroll)
 
         note = Gtk.Label(
@@ -212,24 +215,26 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
 
     def _bind_wheel_scroll_capture(self, widget: Gtk.Widget) -> None:
         """CAPTURE sur chaque bloc de réglages : la molette défile avant SwitchRow / Scale."""
-        # VERTICAL seul : avec DISCRETE, dy peut rester à 0 sur certains trackpads / Wayland.
-        ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
-        ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        ctrl.connect('scroll', self._on_wheel_scroll_capture)
-        widget.add_controller(ctrl)
-
-    def _bind_scale_wheel_scroll_only(self, scale: Gtk.Scale) -> None:
-        """CAPTURE en tête du Scale : la molette ne modifie pas la valeur, elle défile la liste."""
         ctrl = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
             | Gtk.EventControllerScrollFlags.HORIZONTAL
         )
         ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        ctrl.connect('scroll', self._on_scale_wheel_capture)
-        if hasattr(scale, 'prepend_controller'):
-            scale.prepend_controller(ctrl)
+        ctrl.connect('scroll', self._on_wheel_scroll_capture)
+        widget.add_controller(ctrl)
+
+    def _bind_wheel_scroll_row_prepend(self, row: Gtk.Widget) -> None:
+        """CAPTURE en tête de la ligne (ActionRow) : avant le Gtk.Scale en suffixe."""
+        ctrl = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL
+            | Gtk.EventControllerScrollFlags.HORIZONTAL
+        )
+        ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        ctrl.connect('scroll', self._on_action_row_wheel_capture)
+        if hasattr(row, 'prepend_controller'):
+            row.prepend_controller(ctrl)
         else:
-            scale.add_controller(ctrl)
+            row.add_controller(ctrl)
 
     def _wheel_redirect_scroll(
         self, dx: float, dy: float, *, consume_when_no_range: bool
@@ -252,10 +257,10 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
     ) -> bool:
         return self._wheel_redirect_scroll(dx, dy, consume_when_no_range=False)
 
-    def _on_scale_wheel_capture(
+    def _on_action_row_wheel_capture(
         self, _controller: Gtk.EventControllerScroll, dx: float, dy: float
     ) -> bool:
-        # Toujours consommer si la molette a bougé : sinon Gtk.Range change le gain / monitor.
+        # Toujours consommer si la molette a bougé : le Scale en suffixe ne doit pas la voir.
         return self._wheel_redirect_scroll(dx, dy, consume_when_no_range=True)
 
     def _toast_usb_error(self, message: str) -> None:
