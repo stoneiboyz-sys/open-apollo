@@ -185,7 +185,7 @@ class SoloUsbMixerWindow(Gtk.Window):
             root.pack_start(f, False, False, 0)
 
         # --- Monitor (casque / mix micro + lecture) ---
-        mon = Gtk.Frame(label='Monitor (casque — niveau matériel USB)')
+        mon = Gtk.Frame(label='Monitor — casque (volume du retour, pas le master DAW)')
         mv = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         mon.add(mv)
 
@@ -193,7 +193,7 @@ class SoloUsbMixerWindow(Gtk.Window):
         msc = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=madj)
         msc.set_digits(0)
         msc.connect('value-changed', self._on_monitor_db)
-        mv.pack_start(Gtk.Label(label='Niveau (dB)'), False, False, 0)
+        mv.pack_start(Gtk.Label(label='Niveau monitor (dB)'), False, False, 0)
         mv.pack_start(msc, False, False, 0)
         self.monitor_scale = msc
 
@@ -210,8 +210,8 @@ class SoloUsbMixerWindow(Gtk.Window):
         root.pack_start(mon, False, False, 0)
 
         note = Gtk.Label(
-            label='Le « master » logiciel (DAW / volume OS) est séparé : ici c’est le\n'
-            'monitor USB hardware. Le son système passe encore par PipeWire.'
+            label='Le bus master du DAW (là où tout le mix part à la fin) ne se règle pas ici.\n'
+            'Cette fenêtre ne fait que le monitor Apollo (casque / retour micro + lecture).'
         )
         note.set_line_wrap(True)
         note.get_style_context().add_class('dim-label')
