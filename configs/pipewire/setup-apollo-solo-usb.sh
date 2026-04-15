@@ -41,19 +41,30 @@ wpctl set-profile "$DEVICE_ID" "$APOLLO_USB_PROFILE" 2>/dev/null || true
 sleep 1
 log "Apollo profile set to $APOLLO_USB_PROFILE"
 
-# Discover node names
+# Discover node names (robust against profile naming differences).
+INPUT_NODE="${INPUT_NODE:-}"
+OUTPUT_NODE="${OUTPUT_NODE:-}"
 eval "$(pw-dump 2>/dev/null | python3 -c "
 import json, sys
+in_name = ''
+out_name = ''
 for obj in json.load(sys.stdin):
     props = obj.get('info', {}).get('props', {})
-    if 'Apollo Solo USB' not in props.get('alsa.card_name', ''): continue
+    if 'Apollo Solo USB' not in props.get('alsa.card_name', ''):
+        continue
     name = props.get('node.name', '')
-    if 'input' in name and 'loopback' not in name: print(f'INPUT_NODE=\"{name}\"')
-    if 'output' in name and 'loopback' not in name: print(f'OUTPUT_NODE=\"{name}\"')
-" 2>/dev/null || echo 'INPUT_NODE="" ; OUTPUT_NODE=""')"
+    if not name:
+        continue
+    if name.startswith('alsa_input.') and 'loopback' not in name and not in_name:
+        in_name = name
+    if name.startswith('alsa_output.') and 'loopback' not in name and not out_name:
+        out_name = name
+print(f'INPUT_NODE=\"{in_name}\"')
+print(f'OUTPUT_NODE=\"{out_name}\"')
+" 2>/dev/null || true)"
 
-[ -z "$INPUT_NODE" ] && { log "Input node not found"; exit 1; }
-[ -z "$OUTPUT_NODE" ] && { log "Output node not found"; exit 1; }
+[ -z "${INPUT_NODE:-}" ] && { log "Input node not found"; exit 1; }
+[ -z "${OUTPUT_NODE:-}" ] && { log "Output node not found"; exit 1; }
 log "Input:  $INPUT_NODE"
 log "Output: $OUTPUT_NODE"
 
