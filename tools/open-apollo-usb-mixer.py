@@ -23,7 +23,7 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 try:
     import usb.core
@@ -60,7 +60,7 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
             xalign=0.0,
         )
         self.status.set_wrap(True)
-        self.status.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.status.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         btn = Gtk.Button(label='Reconnecter')
         btn.connect('clicked', self.on_reconnect)
         status_box.append(self.status)
@@ -176,7 +176,7 @@ class SoloUsbMixerWindow(Adw.ApplicationWindow):
             xalign=0.0,
         )
         note.set_wrap(True)
-        note.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         note.add_css_class('dim-label')
         note.set_margin_start(18)
         note.set_margin_end(18)
